@@ -2778,6 +2778,66 @@ def pick_port(preferred: int) -> int:
     return preferred
 
 
+def run_macos_app(url: str, open_browser: bool = True) -> bool:
+    """Run a minimal Cocoa app loop so the bundled .app behaves like a real Mac
+    app: a working Quit menu (Cmd-Q), reopen-on-Dock-click (re-opens the browser
+    tab), and a responsive process (no Dock bounce / force-quit).
+
+    The HTTP server runs in a background thread; this owns the main thread.
+    Returns False if AppKit is unavailable (e.g. a plain dev run).
+    """
+    try:
+        import AppKit
+        from Foundation import NSObject
+    except Exception:  # noqa: BLE001
+        return False
+
+    def open_ui() -> None:
+        webbrowser.open(url)
+
+    class _Delegate(NSObject):
+        def applicationDidFinishLaunching_(self, _notification):  # noqa: N802
+            if open_browser:
+                open_ui()
+
+        def applicationShouldHandleReopen_hasVisibleWindows_(self, _app, _flag):  # noqa: N802
+            # Fired when the user clicks the Dock icon while the app is running.
+            open_ui()
+            return True
+
+        def openUI_(self, _sender):  # noqa: N802
+            open_ui()
+
+    app = AppKit.NSApplication.sharedApplication()
+    app.setActivationPolicy_(AppKit.NSApplicationActivationPolicyRegular)
+    delegate = _Delegate.alloc().init()
+    app.setDelegate_(delegate)
+
+    # Build a minimal menu bar: an "Open" item and a real Quit item.
+    main_menu = AppKit.NSMenu.alloc().init()
+    app_item = AppKit.NSMenuItem.alloc().init()
+    main_menu.addItem_(app_item)
+    app.setMainMenu_(main_menu)
+
+    app_menu = AppKit.NSMenu.alloc().init()
+    open_item = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+        "Open Beam YouTube Downloader", "openUI:", "o"
+    )
+    open_item.setTarget_(delegate)
+    app_menu.addItem_(open_item)
+    app_menu.addItem_(AppKit.NSMenuItem.separatorItem())
+    app_menu.addItem_(
+        AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Quit Beam YouTube Downloader", "terminate:", "q"
+        )
+    )
+    app_item.setSubmenu_(app_menu)
+
+    app.activateIgnoringOtherApps_(True)
+    app.run()
+    return True
+
+
 def main() -> None:
     DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -2787,8 +2847,21 @@ def main() -> None:
     url = f"http://{HOST}:{port}"
     print(f"Beam YouTube Downloader is running at {url}")
     write_app_log(f"app started at {url}")
-    if os.environ.get("YT_DOWNLOADER_NO_BROWSER") != "1":
-        # Give the server a beat to start accepting connections, then open it.
+
+    want_browser = os.environ.get("YT_DOWNLOADER_NO_BROWSER") != "1"
+
+    # Packaged .app: drive a proper Cocoa lifecycle (Quit menu, reopen, no bounce).
+    if is_frozen():
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            if run_macos_app(url, open_browser=want_browser):
+                server.server_close()
+                return
+        except Exception as exc:  # noqa: BLE001
+            write_app_log(f"macOS app loop failed, serving in foreground instead: {exc}")
+
+    # Dev run (or AppKit unavailable): open the browser and block on the server.
+    if want_browser:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     try:
         server.serve_forever()

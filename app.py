@@ -22,7 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, urlencode, unquote, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
@@ -167,6 +167,7 @@ class PreviewData:
     embed_url: str = ""
     thumbnail_url: str = ""
     warning: str = ""
+    effective_url: str = ""
 
 
 @dataclass
@@ -1091,6 +1092,14 @@ def render_page() -> bytes:
         return document.querySelector('input[name="media"]:checked').value;
       }}
 
+      function escapeHtml(value) {{
+        return String(value == null ? "" : value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }}
+
       function showBanner(message, tone = "info") {{
         const banner = document.getElementById("banner");
         banner.textContent = message;
@@ -1313,7 +1322,7 @@ def render_page() -> bytes:
         subs.forEach((folder) => {{
           const row = document.createElement("div");
           row.className = "fx-row" + (isSelectedFolder(folder.id) ? " selected" : "");
-          row.innerHTML = `<div class="fx-icon">&#128193;</div><div class="fx-name">${{folder.name}}</div>`;
+          row.innerHTML = `<div class="fx-icon">&#128193;</div><div class="fx-name">${{escapeHtml(folder.name)}}</div>`;
           row.addEventListener("click", () => {{
             trintSelected = {{ kind: "folder", id: folder.id, name: folder.name }};
             renderTrintModal();
@@ -1336,7 +1345,7 @@ def render_page() -> bytes:
         filesIn(trintCwd).forEach((file) => {{
           const row = document.createElement("div");
           row.className = "fx-row file";
-          row.innerHTML = `<div class="fx-icon">&#127897;</div><div class="fx-name">${{file.name}}</div><div class="fx-meta">${{file.meta || "Trint file"}}</div>`;
+          row.innerHTML = `<div class="fx-icon">&#127897;</div><div class="fx-name">${{escapeHtml(file.name)}}</div><div class="fx-meta">${{escapeHtml(file.meta || "Trint file")}}</div>`;
           list.appendChild(row);
         }});
 
@@ -1415,7 +1424,7 @@ def render_page() -> bytes:
         document.getElementById("detailsChannel").textContent = preview.channel || "-";
         document.getElementById("detailsType").textContent = preview.detected_kind === "playlist" ? "Playlist" : "Single video";
         document.getElementById("detailsCount").textContent = preview.item_count || "-";
-        document.getElementById("detailsWarning").textContent = "";
+        document.getElementById("detailsWarning").textContent = preview.warning || "";
         // Auto-set the Link Type toggle to match what was detected.
         const detected = document.querySelector(`input[name="kind"][value="${{preview.detected_kind}}"]`);
         if (detected) detected.checked = true;
@@ -1531,7 +1540,7 @@ def render_page() -> bytes:
           for (const job of state.queued_jobs) {{
             const item = document.createElement("div");
             item.className = "job-item";
-            item.innerHTML = `<strong>#${{job.id}} ${{job.preview.title}}</strong><div class="help">${{job.media_type}} • waiting to start</div>`;
+            item.innerHTML = `<strong>#${{job.id}} ${{escapeHtml(job.preview.title)}}</strong><div class="help">${{escapeHtml(job.media_type)}} • waiting to start</div>`;
             queueList.appendChild(item);
           }}
         }}
@@ -1557,7 +1566,7 @@ def render_page() -> bytes:
             const wrapper = document.createElement("div");
             wrapper.style.marginBottom = "14px";
             const heading = document.createElement("div");
-            heading.innerHTML = `<strong>#${{job.id}} ${{job.preview.title}}</strong>`;
+            heading.innerHTML = `<strong>#${{job.id}} ${{escapeHtml(job.preview.title)}}</strong>`;
             wrapper.appendChild(heading);
             if (job.trint_uploaded_files && job.trint_uploaded_files.length) {{
               const note = document.createElement("div");
@@ -2135,15 +2144,48 @@ def friendly_ytdlp_error(raw: str) -> str:
     return first or "Something went wrong reading this link. Please check the URL and try again."
 
 
+def extract_playlist_id(url: str) -> str:
+    """Return a real playlist id from a URL, ignoring auto-generated mixes (RD/UL)."""
+    list_id = parse_qs(urlparse(url).query).get("list", [""])[0]
+    if list_id.startswith(("RD", "UL", "RDMM")):
+        return ""  # YouTube "mix"/radio — infinite, not a real downloadable playlist
+    return list_id
+
+
+def resolve_download_target(url: str, requested_mode: str) -> tuple[str, str]:
+    """Decide whether to act on the single video or the whole playlist.
+
+    A `watch?v=X&list=Y` link defaults to the single video the user pasted; the
+    whole playlist is only used when there's no single video, or the user
+    explicitly picks Playlist. Returns (mode, url_to_download).
+    """
+    video_id = extract_video_id(url)
+    list_id = extract_playlist_id(url)
+    if requested_mode == "playlist" and list_id:
+        mode = "playlist"
+    elif requested_mode == "single" and video_id:
+        mode = "single"
+    elif list_id and not video_id:
+        mode = "playlist"
+    else:
+        mode = "single"
+    if mode == "playlist":
+        target = f"https://www.youtube.com/playlist?list={list_id}" if list_id else url
+    else:
+        target = f"https://www.youtube.com/watch?v={video_id}" if video_id else url
+    return mode, target
+
+
 def fetch_preview(url: str, requested_mode: str) -> PreviewData:
     if not is_probable_youtube_url(url):
         raise RuntimeError("Please paste a valid YouTube link (youtube.com or youtu.be).")
+    detected_kind, target = resolve_download_target(url, requested_mode)
     command = yt_dlp_base_command()
-    command.extend(["--dump-single-json", "--skip-download", "--flat-playlist", url])
+    command.extend(["--dump-single-json", "--skip-download", "--flat-playlist", target])
     completed = subprocess.run(command, capture_output=True, text=True, check=False)
     if completed.returncode != 0:
         stderr = completed.stderr.strip() or completed.stdout.strip() or "Preview failed."
-        write_app_log(f"preview failed for {url!r}: {stderr[:500]}")
+        write_app_log(f"preview failed for {url!r} (target={target!r}): {stderr[:500]}")
         raise RuntimeError(friendly_ytdlp_error(stderr))
 
     try:
@@ -2152,10 +2194,9 @@ def fetch_preview(url: str, requested_mode: str) -> PreviewData:
         write_app_log(f"preview parse failed for {url!r}")
         raise RuntimeError("Couldn't read this link. Make sure it's a valid YouTube video or playlist URL.")
     entries = data.get("entries") or []
-    detected_kind = "playlist" if data.get("_type") == "playlist" or len(entries) > 1 else "single"
     warning = ""
-    if requested_mode != detected_kind:
-        warning = f"You selected {requested_mode}, but this link looks like a {detected_kind}. The downloader will use the detected type."
+    if detected_kind == "single" and extract_playlist_id(url):
+        warning = "This video is part of a playlist. Switch to \"Playlist\" if you want to download all of its videos."
 
     if detected_kind == "playlist":
         first_entry = entries[0] if entries else {}
@@ -2182,6 +2223,7 @@ def fetch_preview(url: str, requested_mode: str) -> PreviewData:
         embed_url=build_embed_url(preview_url),
         thumbnail_url=thumbnail_url,
         warning=warning,
+        effective_url=target,
     )
 
 
@@ -2476,9 +2518,10 @@ def download_single(job: DownloadJob) -> None:
     command = yt_dlp_base_command()
     command.extend(["--newline", "--print", "after_move:MOVE:%(filepath)s", "-o", build_output_template(folder, preview.title)])
     add_media_args(command, job.media_type, job)
-    command.append(job.url)
+    download_url = job.preview.effective_url or job.url
+    command.append(download_url)
     job.log(f"Downloading {preview.title}")
-    write_app_log(f"job-{job.id}: downloader command for single item {job.url}")
+    write_app_log(f"job-{job.id}: downloader command for single item {download_url}")
 
     outputs = run_yt_dlp(command, job)
     if not outputs:
@@ -2499,7 +2542,7 @@ def download_playlist(job: DownloadJob, delay_seconds: int) -> None:
     playlist_title = job.preview.title
     folder = Path(job.output_dir) / sanitize_name(playlist_title)
     folder.mkdir(parents=True, exist_ok=True)
-    entries = fetch_playlist_entries(job.url)
+    entries = fetch_playlist_entries(job.preview.effective_url or job.url)
     total = len(entries)
     job.log(f"Playlist contains {total} item(s)")
     if total == 0:
@@ -2542,7 +2585,7 @@ def download_playlist(job: DownloadJob, delay_seconds: int) -> None:
             for remaining in range(delay_seconds, 0, -1):
                 if job.cancel_requested:
                     raise DownloadCancelled("Download cancelled.")
-                job.set_status(f"Pausing briefly before the next video")
+                job.set_status("Pausing briefly before the next video")
                 job.progress_label = f"Starting the next video in {remaining}s"
                 time.sleep(1)
 
@@ -2667,11 +2710,11 @@ def queue_job(
     if upload_to_trint:
         drive = trint_workspace_name or "My Drive"
         if trint_new_folder:
-            job.log(f"Trint upload: on")
+            job.log("Trint upload: on")
             job.log(f"Trint destination: {drive} / {trint_folder_name} (new folder, created on download)")
         else:
             destination = trint_folder_name or "Top level"
-            job.log(f"Trint upload: on")
+            job.log("Trint upload: on")
             job.log(f"Trint destination: {drive} / {destination}")
     return job
 

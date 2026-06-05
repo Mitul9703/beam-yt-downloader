@@ -1,0 +1,11 @@
+downloads/
+__pycache__/
+build/
+dist/
+.pyinstaller/
+*.spec
+.buildvenv/
+bin/
+logs/
+.beam_downloader_settings.json
+.DS_Store

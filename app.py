@@ -241,21 +241,24 @@ def render_page() -> bytes:
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Beam YouTube Downloader</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet">
     <style>
       :root {{
-        --bg-1: #f0dfc7;
-        --bg-2: #f8f2e9;
-        --panel: rgba(255, 251, 244, 0.95);
-        --panel-strong: #fffdf8;
-        --ink: #182329;
-        --muted: #67757c;
-        --accent: #b85b2b;
-        --accent-dark: #8d421d;
-        --line: #dccfbc;
-        --line-soft: #eee4d6;
-        --success: #edf7ed;
-        --error: #fff1ed;
-        --shadow: 0 28px 70px rgba(51, 32, 16, 0.13);
+        --bg: #f4f3f0;
+        --panel: #ffffff;
+        --panel-strong: #ffffff;
+        --ink: #161616;
+        --muted: #585858;
+        --accent: #ffc627;
+        --accent-dark: #161616;
+        --gold-soft: #fff7da;
+        --line: #e2e0db;
+        --line-soft: #ededea;
+        --success: #eef6ee;
+        --error: #fdeeea;
+        --shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
       }}
 
       * {{
@@ -264,45 +267,63 @@ def render_page() -> bytes:
 
       body {{
         margin: 0;
-        font-family: "Avenir Next", "Segoe UI", sans-serif;
+        font-family: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         color: var(--ink);
-        background:
-          radial-gradient(circle at top left, #ffd9af 0, transparent 28%),
-          radial-gradient(circle at 85% 20%, #f0c8a9 0, transparent 18%),
-          linear-gradient(135deg, var(--bg-1), var(--bg-2));
+        background: var(--bg);
         min-height: 100vh;
+        -webkit-font-smoothing: antialiased;
       }}
 
       main {{
-        width: min(1180px, calc(100% - 32px));
-        margin: 28px auto;
-        background: var(--panel);
-        border: 1px solid rgba(220, 207, 188, 0.85);
-        border-radius: 28px;
-        box-shadow: var(--shadow);
-        overflow: hidden;
+        width: 100%;
+        max-width: 1320px;
+        margin: 0 auto;
+        padding: 0 clamp(16px, 4vw, 48px) 56px;
       }}
 
       .hero {{
-        padding: 28px 30px 18px;
-        border-bottom: 1px solid var(--line);
+        padding: 30px 0 18px;
+        margin-bottom: 24px;
+        border-bottom: 2px solid var(--ink);
         display: flex;
         justify-content: space-between;
-        align-items: center;
+        align-items: flex-end;
+        gap: 16px;
       }}
 
       h1 {{
         margin: 0;
-        font-size: clamp(2rem, 4vw, 3.2rem);
+        font-family: "Oswald", "Arial Narrow", sans-serif;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.01em;
+        font-size: clamp(1.6rem, 3vw, 2.3rem);
         line-height: 1;
-        letter-spacing: -0.03em;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }}
+
+      h1::before {{
+        content: "";
+        width: 14px;
+        height: 26px;
+        background: var(--accent);
+        display: inline-block;
+      }}
+
+      h2, h3 {{
+        font-family: "Oswald", "Arial Narrow", sans-serif;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        font-weight: 600;
       }}
 
       .layout {{
         display: grid;
-        grid-template-columns: 1.12fr 0.88fr;
+        grid-template-columns: 1.2fr 0.8fr;
         gap: 20px;
-        padding: 26px 30px 30px;
+        padding: 0;
       }}
 
       .stack {{
@@ -311,31 +332,32 @@ def render_page() -> bytes:
       }}
 
       .card {{
-        background: var(--panel-strong);
+        background: var(--panel);
         border: 1px solid var(--line);
-        border-radius: 22px;
-        padding: 22px;
+        border-radius: 12px;
+        padding: 22px 24px;
       }}
 
       .card h2 {{
-        margin: 0 0 14px;
-        font-size: 1.18rem;
+        margin: 0 0 16px;
+        font-size: 1.05rem;
       }}
 
       label {{
         display: block;
-        font-weight: 700;
+        font-weight: 600;
+        font-size: 0.9rem;
         margin-bottom: 8px;
       }}
 
       textarea {{
         width: 100%;
-        min-height: 110px;
+        min-height: 92px;
         resize: vertical;
-        padding: 14px 15px;
-        border: 1px solid #cfbea7;
-        border-radius: 14px;
-        background: white;
+        padding: 12px 14px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
         color: var(--ink);
         font: inherit;
       }}
@@ -344,12 +366,20 @@ def render_page() -> bytes:
       input[type="password"],
       select {{
         width: 100%;
-        padding: 12px 14px;
-        border: 1px solid #cfbea7;
-        border-radius: 14px;
-        background: white;
+        padding: 11px 13px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
         color: var(--ink);
         font: inherit;
+      }}
+
+      textarea:focus,
+      input:focus,
+      select:focus {{
+        outline: none;
+        border-color: var(--ink);
+        box-shadow: 0 0 0 3px rgba(255, 198, 39, 0.4);
       }}
 
       .inline-grid {{
@@ -363,7 +393,7 @@ def render_page() -> bytes:
         width: 100%;
         gap: 3px;
         flex-wrap: nowrap;
-        background: #ece3d5;
+        background: #ebe9e3;
         padding: 4px;
         border-radius: 12px;
       }}
@@ -406,55 +436,61 @@ def render_page() -> bytes:
       }}
 
       .radio-pill:has(input:checked) {{
-        background: #fffdf8;
-        color: var(--accent-dark);
-        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.16);
+        background: #fff;
+        color: var(--ink);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
       }}
 
       .actions {{
         display: flex;
-        gap: 12px;
+        gap: 10px;
         flex-wrap: wrap;
       }}
 
       button {{
-        border: 0;
-        border-radius: 999px;
-        padding: 13px 18px;
-        background: var(--accent);
-        color: white;
+        border: 1px solid var(--ink);
+        border-radius: 6px;
+        padding: 11px 18px;
+        background: var(--ink);
+        color: #fff;
         font: inherit;
-        font-weight: 700;
+        font-weight: 600;
+        letter-spacing: 0.01em;
         cursor: pointer;
+        transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
       }}
 
       button:hover {{
-        background: var(--accent-dark);
+        background: #000;
+        border-color: #000;
       }}
 
       button.secondary {{
-        background: #d8c8b4;
+        background: transparent;
         color: var(--ink);
+        border: 1px solid var(--line);
       }}
 
       button.secondary:hover {{
-        background: #c9b59a;
+        background: #f1efe9;
+        border-color: #c9c6bf;
       }}
 
       button:disabled {{
-        background: #d5d5d5;
-        color: #7e7e7e;
+        background: #ededed;
+        color: #9a9a9a;
+        border-color: #e2e2e2;
         cursor: not-allowed;
       }}
 
       button.is-busy {{
-        background: var(--accent-dark);
+        background: #000;
         color: #fff;
         cursor: progress;
       }}
 
       button.secondary.is-busy {{
-        background: #c9b59a;
+        background: #f1efe9;
         color: var(--ink);
       }}
 
@@ -618,7 +654,7 @@ def render_page() -> bytes:
       .tutorial {{
         border: 1px solid var(--line-soft);
         border-radius: 16px;
-        background: #faf7f1;
+        background: #f7f6f2;
         padding: 16px 18px;
       }}
 
@@ -644,9 +680,9 @@ def render_page() -> bytes:
       }}
 
       .icon-button {{
-        width: 48px;
-        height: 48px;
-        border-radius: 16px;
+        width: 44px;
+        height: 44px;
+        border-radius: 8px;
         padding: 0;
         font-size: 1.2rem;
         display: inline-flex;
@@ -661,7 +697,7 @@ def render_page() -> bytes:
       .trint-inline {{
         border: 1px solid var(--line);
         border-radius: 16px;
-        background: #fffdf8;
+        background: #ffffff;
         padding: 16px 18px;
         display: grid;
         gap: 12px;
@@ -676,7 +712,7 @@ def render_page() -> bytes:
       }}
       .trint-dest-value {{
         display: inline-flex; align-items: center; gap: 8px;
-        background: #f3ece1; border: 1px solid var(--line);
+        background: #f1efe9; border: 1px solid var(--line);
         border-radius: 999px; padding: 8px 14px;
         font-size: 0.92rem; color: var(--ink); font-weight: 600;
         max-width: 100%; overflow: hidden; text-overflow: ellipsis;
@@ -705,7 +741,7 @@ def render_page() -> bytes:
         display: flex; align-items: center; justify-content: space-between;
         gap: 12px; flex-wrap: wrap;
         padding: 14px 24px; border-bottom: 1px solid var(--line-soft);
-        background: #faf7f1;
+        background: #f7f6f2;
       }}
       .fx-breadcrumbs {{
         display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
@@ -725,9 +761,9 @@ def render_page() -> bytes:
         padding: 12px 24px; border-bottom: 1px solid #f0ece4;
         cursor: pointer;
       }}
-      .fx-row:hover {{ background: #faf7f1; }}
-      .fx-row.selected {{ background: #fff1de; box-shadow: inset 3px 0 0 var(--accent-dark); }}
-      .fx-row.here {{ background: #f6f1e8; }}
+      .fx-row:hover {{ background: #f7f6f2; }}
+      .fx-row.selected {{ background: #fff7da; box-shadow: inset 3px 0 0 var(--accent-dark); }}
+      .fx-row.here {{ background: #f4f3f0; }}
       .fx-row.file {{ cursor: default; color: var(--muted); }}
       .fx-row.file:hover {{ background: #fff; }}
       .fx-icon {{ font-size: 1.2rem; width: 24px; text-align: center; flex: 0 0 24px; }}
@@ -738,7 +774,7 @@ def render_page() -> bytes:
         border: 1px solid var(--line); background: #fff; color: var(--ink);
         border-radius: 8px; padding: 6px 12px; font-size: 0.85rem; font-weight: 600;
       }}
-      .fx-open:hover {{ background: #f3ece1; }}
+      .fx-open:hover {{ background: #f1efe9; }}
       .fx-badge {{
         background: #dff3e8; color: #1d7a4d; border-radius: 999px;
         padding: 2px 10px; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em;
@@ -751,7 +787,7 @@ def render_page() -> bytes:
         display: flex; align-items: center; justify-content: space-between;
         gap: 16px; flex-wrap: wrap;
         padding: 16px 24px; border-top: 1px solid var(--line-soft);
-        background: #faf7f1;
+        background: #f7f6f2;
       }}
       .fx-footer-dest {{ font-size: 0.92rem; color: var(--ink); }}
       .fx-footer-dest b {{ color: var(--accent-dark); }}
@@ -783,8 +819,8 @@ def render_page() -> bytes:
         overflow: auto;
         background: var(--panel-strong);
         border: 1px solid var(--line);
-        border-radius: 24px;
-        box-shadow: var(--shadow);
+        border-radius: 14px;
+        box-shadow: 0 20px 50px rgba(0,0,0,0.18);
         padding: 24px;
       }}
 
@@ -797,7 +833,7 @@ def render_page() -> bytes:
       }}
 
       .modal-close {{
-        background: #e8ddd0;
+        background: #ededea;
         color: var(--ink);
       }}
 
@@ -824,7 +860,7 @@ def render_page() -> bytes:
     <main>
       <section class="hero">
         <h1>Beam YouTube Downloader</h1>
-        <button id="openSettingsBtn" class="secondary icon-button" type="button" aria-label="Open settings">⚙</button>
+        <button id="openSettingsBtn" class="secondary" type="button" aria-label="Open settings" style="display:inline-flex; align-items:center; gap:8px; font-size:1rem; padding:11px 18px">&#9881;&#65039; Settings</button>
       </section>
 
       <section class="layout">
@@ -863,7 +899,7 @@ def render_page() -> bytes:
                   <input id="outputDirInput" type="text" style="flex:1" value="{default_output_dir()}">
                   <button id="chooseFolderBtn" class="secondary" type="button">Choose&hellip;</button>
                 </div>
-                <div class="mini-note">Pick a folder, or type/paste a path on this Mac.</div>
+                <div class="mini-note">Choose a folder, or type a path.</div>
               </div>
 
               <div class="check-row">
@@ -873,7 +909,7 @@ def render_page() -> bytes:
 
               <div id="trintUploadPanel" class="hidden" style="display:grid; gap:0">
                 <div id="trintNeedsSettings" class="help hidden">
-                  No Trint key is saved on this Mac yet. Add your personal Trint key in Settings to choose an upload folder.
+                  No Trint key saved yet. Add your key in Settings to choose an upload folder.
                   <div style="margin-top:10px">
                     <button id="openSettingsFromPanelBtn" class="secondary" type="button">Open Settings</button>
                   </div>
@@ -890,7 +926,7 @@ def render_page() -> bytes:
 
               <div class="actions">
                 <button id="downloadBtn" type="button">Download</button>
-                <button id="cancelBtn" class="secondary" type="button" disabled>Cancel Current Download</button>
+                <button id="cancelBtn" class="secondary" type="button" disabled>Cancel download</button>
               </div>
             </div>
           </div>
@@ -899,6 +935,7 @@ def render_page() -> bytes:
             <h2>Link Details</h2>
             <div class="details-box">
               <div id="detailsEmpty" class="help">Paste a YouTube link and the title, channel, link type, and item count will appear here.</div>
+              <div id="detailsError" class="help" style="display:none; color:#b3261e; font-weight:600"></div>
               <div id="detailsContent" style="display:none">
                 <div class="meta-grid">
                   <div class="meta-label">Title</div><div id="detailsTitle">-</div>
@@ -951,7 +988,7 @@ def render_page() -> bytes:
         <div class="modal-header">
           <div>
             <h2 style="margin:0 0 6px">Settings</h2>
-            <div class="mini-note">Save your personal Trint key on this Mac so uploads land in your own Trint access context.</div>
+            <div class="mini-note">Add your personal Trint key so uploads go to your own Trint account.</div>
           </div>
           <button id="closeSettingsBtn" class="secondary modal-close" type="button">Close</button>
         </div>
@@ -972,8 +1009,8 @@ def render_page() -> bytes:
           </div>
 
           <div class="actions">
-            <button id="saveTrintBtn" type="button">Save Trint Key</button>
-            <button id="clearTrintBtn" class="secondary" type="button">Remove Saved Key</button>
+            <button id="saveTrintBtn" type="button">Save key</button>
+            <button id="clearTrintBtn" class="secondary" type="button">Remove key</button>
           </div>
 
           <div class="tutorial">
@@ -989,7 +1026,13 @@ def render_page() -> bytes:
             <div class="tutorial-warn">
               &#9888;&#65039; <b>Important:</b> Trint shows your Key Secret <b>only once</b>, right after you create it. You cannot view or edit it in Trint again afterwards. Copy it and keep it somewhere safe. If you lose it, it can't be recovered &mdash; just delete the old key in Trint and generate a brand-new one.
             </div>
-            <div class="mini-note" style="margin-top:10px">Your key is stored only on this Mac and acts as your own personal Trint access. It is never shared with anyone else.</div>
+            <div class="mini-note" style="margin-top:10px">Your key is stored locally on this computer and is used only for your own uploads. It is never shared.</div>
+          </div>
+
+          <div class="tutorial">
+            <h3 style="margin:0 0 8px; font-size:1rem">Something not working?</h3>
+            <div class="mini-note" style="margin-bottom:12px">Open the logs folder and send the most recent file to whoever set this up — it records what happened so problems can be fixed.</div>
+            <button id="openLogsBtn" class="secondary" type="button">Open logs folder</button>
           </div>
         </div>
       </div>
@@ -1011,7 +1054,10 @@ def render_page() -> bytes:
           </div>
         </div>
         <div class="fx-toolbar">
-          <div id="trintBreadcrumbs" class="fx-breadcrumbs"></div>
+          <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; min-width:0">
+            <button id="trintBackBtn" class="secondary" type="button">&#8592; Back</button>
+            <div id="trintBreadcrumbs" class="fx-breadcrumbs"></div>
+          </div>
           <button id="newFolderBtn" class="secondary" type="button">&#43; New folder here</button>
         </div>
         <div id="trintFxList" class="fx-list"></div>
@@ -1212,6 +1258,7 @@ def render_page() -> bytes:
       function renderTrintModal() {{
         fillSelect("trintSpaceSelect", trintWorkspaces, trintTree.workspace_id);
         renderBreadcrumbs();
+        document.getElementById("trintBackBtn").disabled = !trintCwd;
         const list = document.getElementById("trintFxList");
         list.innerHTML = "";
 
@@ -1362,18 +1409,40 @@ def render_page() -> bytes:
 
       function renderDetails(preview) {{
         document.getElementById("detailsEmpty").style.display = "none";
+        document.getElementById("detailsError").style.display = "none";
         document.getElementById("detailsContent").style.display = "block";
         document.getElementById("detailsTitle").textContent = preview.title || "-";
         document.getElementById("detailsChannel").textContent = preview.channel || "-";
-        document.getElementById("detailsType").textContent = preview.detected_kind || "-";
+        document.getElementById("detailsType").textContent = preview.detected_kind === "playlist" ? "Playlist" : "Single video";
         document.getElementById("detailsCount").textContent = preview.item_count || "-";
-        document.getElementById("detailsWarning").textContent = preview.warning || "";
+        document.getElementById("detailsWarning").textContent = "";
+        // Auto-set the Link Type toggle to match what was detected.
+        const detected = document.querySelector(`input[name="kind"][value="${{preview.detected_kind}}"]`);
+        if (detected) detected.checked = true;
       }}
 
       function clearDetails() {{
         document.getElementById("detailsEmpty").style.display = "block";
+        document.getElementById("detailsError").style.display = "none";
         document.getElementById("detailsContent").style.display = "none";
         document.getElementById("detailsWarning").textContent = "";
+      }}
+
+      function looksLikeYouTube(url) {{
+        try {{
+          const host = new URL(url).hostname.toLowerCase();
+          return host.endsWith("youtube.com") || host.endsWith("youtu.be") || host.endsWith("youtube-nocookie.com");
+        }} catch (e) {{
+          return false;
+        }}
+      }}
+
+      function renderDetailsError(message) {{
+        document.getElementById("detailsEmpty").style.display = "none";
+        document.getElementById("detailsContent").style.display = "none";
+        const err = document.getElementById("detailsError");
+        err.style.display = "block";
+        err.textContent = message;
       }}
 
       async function loadDetailsForUrl() {{
@@ -1404,7 +1473,7 @@ def render_page() -> bytes:
             return;
           }}
           lastDetailUrl = "";
-          clearDetails();
+          renderDetailsError(error.message || "Couldn't read this link.");
         }}
       }}
 
@@ -1545,6 +1614,11 @@ def render_page() -> bytes:
           showBanner("Paste a YouTube link first.", "error");
           return;
         }}
+        if (!looksLikeYouTube(url)) {{
+          showBanner("Please paste a valid YouTube link (youtube.com or youtu.be).", "error");
+          renderDetailsError("That doesn't look like a YouTube link.");
+          return;
+        }}
 
         runBusy(button, "Starting...", async () => {{
           if ("Notification" in window && Notification.permission === "default") {{
@@ -1610,6 +1684,14 @@ def render_page() -> bytes:
         document.getElementById("settingsModal").classList.remove("show");
       }});
 
+      document.getElementById("openLogsBtn").addEventListener("click", () => {{
+        const button = document.getElementById("openLogsBtn");
+        runBusy(button, "Opening...", async () => {{
+          await requestJson("/api/open-logs", {{}});
+          showBanner("Opened the logs folder.", "success");
+        }}).catch((error) => showBanner(error.message, "error"));
+      }});
+
       document.getElementById("toggleSecretBtn").addEventListener("click", () => {{
         const field = document.getElementById("trintKeySecret");
         const button = document.getElementById("toggleSecretBtn");
@@ -1636,6 +1718,13 @@ def render_page() -> bytes:
       document.getElementById("cancelTrintModalBtn").addEventListener("click", closeTrintModal);
       document.getElementById("trintFolderModal").addEventListener("click", (event) => {{
         if (event.target.id === "trintFolderModal") closeTrintModal();
+      }});
+
+      document.getElementById("trintBackBtn").addEventListener("click", () => {{
+        const f = folderById(trintCwd);
+        trintCwd = f ? (f.parent_id || "") : "";
+        trintSelected = null;
+        renderTrintModal();
       }});
 
       document.getElementById("newFolderBtn").addEventListener("click", () => {{
@@ -1721,7 +1810,7 @@ def render_page() -> bytes:
           document.getElementById("trintKeySecret").value = data.settings.key_secret || keySecret;
           trintSettingsState = data.settings;
           trintTreeLoaded = false;
-          showBanner("Trint key saved on this Mac.", "success");
+          showBanner("Trint key saved.", "success");
           document.getElementById("settingsModal").classList.remove("show");
           renderTrintInline();
         }}).catch((error) => showBanner(error.message, "error"));
@@ -1738,7 +1827,7 @@ def render_page() -> bytes:
           trintTreeLoaded = false;
           trintDestination = null;
           renderTrintInline();
-          showBanner("Saved Trint key removed from this Mac.", "info");
+          showBanner("Trint key removed.", "info");
         }}).catch((error) => showBanner(error.message, "error"));
       }});
 
@@ -2017,15 +2106,51 @@ def pick_thumbnail(data: dict[str, Any], entry: dict[str, Any] | None = None) ->
     return ""
 
 
+def is_probable_youtube_url(url: str) -> bool:
+    u = url.strip().lower()
+    if not u.startswith(("http://", "https://")):
+        return False
+    return any(host in u for host in ("youtube.com/", "youtu.be/", "youtube-nocookie.com/"))
+
+
+def friendly_ytdlp_error(raw: str) -> str:
+    """Turn a raw yt-dlp error into a message a non-technical user can act on."""
+    text = (raw or "").strip()
+    low = text.lower()
+    if "unsupported url" in low or "is not a valid url" in low:
+        return "That doesn't look like a valid YouTube link. Please double-check the URL."
+    if "video unavailable" in low or "this video is unavailable" in low or "removed by the uploader" in low:
+        return "This video is unavailable. It may have been removed, made private, or blocked in your region."
+    if "private video" in low or "members-only" in low or "join this channel" in low:
+        return "This video is private or members-only, so it can't be downloaded."
+    if "sign in to confirm your age" in low or "age" in low and "restricted" in low:
+        return "This video is age-restricted and can't be downloaded without signing in."
+    if "requested format is not available" in low or "no video formats" in low:
+        return "No downloadable formats were found for this link."
+    if any(s in low for s in ("getaddrinfo", "name resolution", "network is unreachable", "failed to resolve", "unable to download webpage")):
+        return "Couldn't reach YouTube. Check your internet connection and try again."
+    if "http error 429" in low or "too many requests" in low:
+        return "YouTube is temporarily rate-limiting requests. Please wait a minute and try again."
+    first = (text.splitlines()[0] if text else "").replace("ERROR:", "").strip()
+    return first or "Something went wrong reading this link. Please check the URL and try again."
+
+
 def fetch_preview(url: str, requested_mode: str) -> PreviewData:
+    if not is_probable_youtube_url(url):
+        raise RuntimeError("Please paste a valid YouTube link (youtube.com or youtu.be).")
     command = yt_dlp_base_command()
     command.extend(["--dump-single-json", "--skip-download", "--flat-playlist", url])
     completed = subprocess.run(command, capture_output=True, text=True, check=False)
     if completed.returncode != 0:
         stderr = completed.stderr.strip() or completed.stdout.strip() or "Preview failed."
-        raise RuntimeError(stderr)
+        write_app_log(f"preview failed for {url!r}: {stderr[:500]}")
+        raise RuntimeError(friendly_ytdlp_error(stderr))
 
-    data = json.loads(completed.stdout)
+    try:
+        data = json.loads(completed.stdout)
+    except Exception:  # noqa: BLE001
+        write_app_log(f"preview parse failed for {url!r}")
+        raise RuntimeError("Couldn't read this link. Make sure it's a valid YouTube video or playlist URL.")
     entries = data.get("entries") or []
     detected_kind = "playlist" if data.get("_type") == "playlist" or len(entries) > 1 else "single"
     warning = ""
@@ -2066,7 +2191,8 @@ def fetch_playlist_entries(url: str) -> list[dict[str, Any]]:
     completed = subprocess.run(command, capture_output=True, text=True, check=False)
     if completed.returncode != 0:
         stderr = completed.stderr.strip() or completed.stdout.strip() or "Could not load playlist entries."
-        raise RuntimeError(stderr)
+        write_app_log(f"playlist load failed for {url!r}: {stderr[:500]}")
+        raise RuntimeError(friendly_ytdlp_error(stderr))
     data = json.loads(completed.stdout)
     return data.get("entries") or []
 
@@ -2659,6 +2785,7 @@ class AppHandler(BaseHTTPRequestHandler):
             "/api/queue",
             "/api/cancel",
             "/api/choose-folder",
+            "/api/open-logs",
             "/api/trint/settings/save",
             "/api/trint/settings/clear",
             "/api/trint/workspaces",
@@ -2781,6 +2908,15 @@ class AppHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
             return
 
+        if parsed.path == "/api/open-logs":
+            try:
+                LOGS_DIR.mkdir(parents=True, exist_ok=True)
+                subprocess.run(["open", str(LOGS_DIR)], check=False)
+                self._send_json({"path": str(LOGS_DIR)})
+            except Exception as exc:  # noqa: BLE001
+                self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
         if not YT_DLP:
             self._send_json({"error": "yt-dlp is not installed. Install it first, then refresh this page."}, status=HTTPStatus.BAD_REQUEST)
             return
@@ -2878,6 +3014,31 @@ class AppHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+
+def _binary_version(path: str | None) -> str:
+    if not path:
+        return "MISSING"
+    try:
+        out = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=15)
+        return (out.stdout or out.stderr).strip().splitlines()[0] if (out.stdout or out.stderr).strip() else "unknown"
+    except Exception:  # noqa: BLE001
+        return "unknown"
+
+
+def log_environment(url: str) -> None:
+    """Write a diagnostic snapshot to app.log so problems can be traced remotely."""
+    import platform
+
+    write_app_log("================ app starting ================")
+    write_app_log(f"serving at {url}")
+    write_app_log(f"version frozen={is_frozen()} python={platform.python_version()} os={platform.platform()}")
+    write_app_log(f"data_dir={DATA_DIR}")
+    write_app_log(f"yt-dlp path={YT_DLP} version={_binary_version(YT_DLP)}")
+    write_app_log(f"ffmpeg path={FFMPEG} version={_binary_version(FFMPEG)}")
+    write_app_log(f"ffprobe present={bool(FFPROBE)} node present={bool(NODE)}")
+    trint = get_trint_settings()
+    write_app_log(f"trint key configured={trint.configured}")
 
 
 def choose_folder_dialog(initial: str = "") -> str | None:
@@ -2987,7 +3148,7 @@ def main() -> None:
     server = ThreadingHTTPServer((HOST, port), AppHandler)
     url = f"http://{HOST}:{port}"
     print(f"Beam YouTube Downloader is running at {url}")
-    write_app_log(f"app started at {url}")
+    log_environment(url)
 
     want_browser = os.environ.get("YT_DOWNLOADER_NO_BROWSER") != "1"
 

@@ -360,8 +360,12 @@ def render_page() -> bytes:
 
       .radio-row {{
         display: flex;
-        gap: 12px;
-        flex-wrap: wrap;
+        width: 100%;
+        gap: 3px;
+        flex-wrap: nowrap;
+        background: #ece3d5;
+        padding: 4px;
+        border-radius: 12px;
       }}
 
       .check-row {{
@@ -371,13 +375,40 @@ def render_page() -> bytes:
       }}
 
       .radio-pill {{
+        flex: 1;
         display: inline-flex;
         align-items: center;
-        gap: 8px;
-        border: 1px solid var(--line);
-        border-radius: 999px;
-        padding: 10px 14px;
-        background: #fff;
+        justify-content: center;
+        text-align: center;
+        white-space: nowrap;
+        border: 0;
+        border-radius: 9px;
+        padding: 9px 10px;
+        background: transparent;
+        color: var(--ink);
+        font-weight: 600;
+        font-size: 0.92rem;
+        cursor: pointer;
+        user-select: none;
+        transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+      }}
+
+      .radio-pill input {{
+        position: absolute;
+        opacity: 0;
+        width: 0;
+        height: 0;
+        pointer-events: none;
+      }}
+
+      .radio-pill:hover {{
+        background: rgba(0, 0, 0, 0.05);
+      }}
+
+      .radio-pill:has(input:checked) {{
+        background: #fffdf8;
+        color: var(--accent-dark);
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.16);
       }}
 
       .actions {{
@@ -416,6 +447,34 @@ def render_page() -> bytes:
         cursor: not-allowed;
       }}
 
+      button.is-busy {{
+        background: var(--accent-dark);
+        color: #fff;
+        cursor: progress;
+      }}
+
+      button.secondary.is-busy {{
+        background: #c9b59a;
+        color: var(--ink);
+      }}
+
+      .btn-spinner {{
+        display: inline-block;
+        width: 14px;
+        height: 14px;
+        border: 2px solid currentColor;
+        border-right-color: transparent;
+        border-radius: 50%;
+        vertical-align: -2px;
+        margin-right: 8px;
+        animation: spin 0.7s linear infinite;
+        opacity: 0.85;
+      }}
+
+      @keyframes spin {{
+        to {{ transform: rotate(360deg); }}
+      }}
+
       .help {{
         color: var(--muted);
         font-size: 0.94rem;
@@ -447,6 +506,21 @@ def render_page() -> bytes:
 
       .loader-dot.show {{
         opacity: 1;
+      }}
+
+      .status-spinner {{
+        width: 18px;
+        height: 18px;
+        border: 2px solid var(--line);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+        display: none;
+        flex: 0 0 18px;
+      }}
+
+      .status-spinner.show {{
+        display: inline-block;
       }}
 
       @keyframes pulse {{
@@ -785,8 +859,11 @@ def render_page() -> bytes:
 
               <div>
                 <label for="outputDirInput">Save To Folder</label>
-                <textarea id="outputDirInput" style="min-height:64px">{default_output_dir()}</textarea>
-                <div class="mini-note">Enter a local folder path on this Mac.</div>
+                <div class="inline-actions">
+                  <input id="outputDirInput" type="text" style="flex:1" value="{default_output_dir()}">
+                  <button id="chooseFolderBtn" class="secondary" type="button">Choose&hellip;</button>
+                </div>
+                <div class="mini-note">Pick a folder, or type/paste a path on this Mac.</div>
               </div>
 
               <div class="check-row">
@@ -840,7 +917,7 @@ def render_page() -> bytes:
             <h2>Download Status</h2>
             <div class="status-box scroll-panel">
               <div class="live-row">
-                <div id="activeLoader" class="loader-dot"></div>
+                <div id="activeLoader" class="status-spinner"></div>
                 <p id="activeStatus" class="help" style="margin:0">No active job right now.</p>
               </div>
               <div id="progressLabel" class="mini-note">Waiting for a download.</div>
@@ -1359,7 +1436,8 @@ def render_page() -> bytes:
           const itemLabel = active.current_item_label ? `Current download: ${{active.current_item_label}}` : "";
           const transferText = active.transfer_label ? `File progress: ${{active.transfer_label}}` : "";
           const stageText = active.progress_label && active.progress_label !== active.transfer_label ? active.progress_label : "";
-          progressLabel.textContent = [itemLabel, transferText, stageText].filter(Boolean).join(" • ") || active.status;
+          const workingHint = active.transfer_label ? "" : "working… large files can take a minute";
+          progressLabel.textContent = [itemLabel, transferText, stageText, workingHint].filter(Boolean).join(" • ") || active.status;
           for (const log of active.logs.slice(-12)) {{
             const li = document.createElement("li");
             li.textContent = log;
@@ -1441,14 +1519,34 @@ def render_page() -> bytes:
         renderJobs(state);
       }}
 
-      document.getElementById("downloadBtn").addEventListener("click", async () => {{
+      async function runBusy(button, busyLabel, fn) {{
+        // Disables the button and shows a spinner for the duration of fn so a
+        // slow action can't be triggered twice by repeated clicks.
+        if (!button || button.dataset.busy === "1") return;
+        button.dataset.busy = "1";
+        const original = button.innerHTML;
+        button.disabled = true;
+        button.classList.add("is-busy");
+        button.innerHTML = `<span class="btn-spinner"></span>${{busyLabel}}`;
+        try {{
+          return await fn();
+        }} finally {{
+          button.dataset.busy = "0";
+          button.disabled = false;
+          button.classList.remove("is-busy");
+          button.innerHTML = original;
+        }}
+      }}
+
+      document.getElementById("downloadBtn").addEventListener("click", () => {{
+        const button = document.getElementById("downloadBtn");
         const url = document.getElementById("urlInput").value.trim();
         if (!url) {{
           showBanner("Paste a YouTube link first.", "error");
           return;
         }}
 
-        try {{
+        runBusy(button, "Starting...", async () => {{
           if ("Notification" in window && Notification.permission === "default") {{
             Notification.requestPermission().catch(() => null);
           }}
@@ -1470,9 +1568,7 @@ def render_page() -> bytes:
           lastDetailUrl = url;
           showBanner(data.job.queue_message || "Download started.", "success");
           await refreshState();
-        }} catch (error) {{
-          showBanner(error.message, "error");
-        }}
+        }}).catch((error) => showBanner(error.message, "error"));
       }});
 
       document.getElementById("cancelBtn").addEventListener("click", async () => {{
@@ -1483,6 +1579,18 @@ def render_page() -> bytes:
         }} catch (error) {{
           showBanner(error.message, "error");
         }}
+      }});
+
+      document.getElementById("chooseFolderBtn").addEventListener("click", () => {{
+        const button = document.getElementById("chooseFolderBtn");
+        runBusy(button, "Opening...", async () => {{
+          const data = await requestJson("/api/choose-folder", {{
+            current: document.getElementById("outputDirInput").value.trim(),
+          }});
+          if (data.path) {{
+            document.getElementById("outputDirInput").value = data.path;
+          }}
+        }}).catch((error) => showBanner(error.message, "error"));
       }});
 
       document.getElementById("urlInput").addEventListener("input", () => {{
@@ -1597,14 +1705,15 @@ def render_page() -> bytes:
         }}
       }});
 
-      document.getElementById("saveTrintBtn").addEventListener("click", async () => {{
+      document.getElementById("saveTrintBtn").addEventListener("click", () => {{
+        const button = document.getElementById("saveTrintBtn");
         const keyId = document.getElementById("trintKeyId").value.trim();
         const keySecret = document.getElementById("trintKeySecret").value.trim();
         if (!keyId || !keySecret) {{
           showBanner("Paste both your Trint key ID and key secret.", "error");
           return;
         }}
-        try {{
+        runBusy(button, "Saving...", async () => {{
           const data = await requestJson("/api/trint/settings/save", {{
             key_id: keyId,
             key_secret: keySecret,
@@ -1615,13 +1724,12 @@ def render_page() -> bytes:
           showBanner("Trint key saved on this Mac.", "success");
           document.getElementById("settingsModal").classList.remove("show");
           renderTrintInline();
-        }} catch (error) {{
-          showBanner(error.message, "error");
-        }}
+        }}).catch((error) => showBanner(error.message, "error"));
       }});
 
-      document.getElementById("clearTrintBtn").addEventListener("click", async () => {{
-        try {{
+      document.getElementById("clearTrintBtn").addEventListener("click", () => {{
+        const button = document.getElementById("clearTrintBtn");
+        runBusy(button, "Removing...", async () => {{
           const data = await requestJson("/api/trint/settings/clear", {{}});
           document.getElementById("trintKeyId").value = "";
           document.getElementById("trintKeySecret").value = "";
@@ -1631,9 +1739,7 @@ def render_page() -> bytes:
           trintDestination = null;
           renderTrintInline();
           showBanner("Saved Trint key removed from this Mac.", "info");
-        }} catch (error) {{
-          showBanner(error.message, "error");
-        }}
+        }}).catch((error) => showBanner(error.message, "error"));
       }});
 
       document.querySelectorAll('input[name="kind"]').forEach((input) => {{
@@ -2552,6 +2658,7 @@ class AppHandler(BaseHTTPRequestHandler):
             "/api/preview",
             "/api/queue",
             "/api/cancel",
+            "/api/choose-folder",
             "/api/trint/settings/save",
             "/api/trint/settings/clear",
             "/api/trint/workspaces",
@@ -2666,6 +2773,14 @@ class AppHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
             return
 
+        if parsed.path == "/api/choose-folder":
+            try:
+                current = str(payload.get("current", "")).strip()
+                self._send_json({"path": choose_folder_dialog(current) or ""})
+            except Exception as exc:  # noqa: BLE001
+                self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
         if not YT_DLP:
             self._send_json({"error": "yt-dlp is not installed. Install it first, then refresh this page."}, status=HTTPStatus.BAD_REQUEST)
             return
@@ -2763,6 +2878,32 @@ class AppHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+
+def choose_folder_dialog(initial: str = "") -> str | None:
+    """Open the native macOS folder picker and return the chosen POSIX path.
+
+    Works because the server runs on the same Mac as the user. Returns None if
+    the user cancels or the dialog can't be shown.
+    """
+    script = (
+        'tell application "System Events" to activate\n'
+        'POSIX path of (choose folder with prompt '
+        '"Choose where to save your downloads")'
+    )
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    if result.returncode != 0:
+        return None  # user pressed Cancel, or no GUI session
+    path = result.stdout.strip()
+    return path or None
 
 
 def pick_port(preferred: int) -> int:

@@ -2004,19 +2004,40 @@ def list_trint_folders(settings: TrintSettings, workspace_id: str) -> list[dict[
         settings,
         query={"workspace-id": workspace_id} if workspace_id else None,
     )
-    results = [{"id": "", "name": "Top level", "parent_id": "", "workspace_id": workspace_id}]
+    # Trint returns a flat list. On personal drives nesting is encoded in the
+    # NAME as a path ("Test1/NestedTest1") with parent/parentId null; on shared
+    # drives an explicit `parent`/`parentId` may be present. Support both.
+    raw: list[dict[str, str]] = []
     if isinstance(data, list):
         for item in data:
             if not isinstance(item, dict):
                 continue
-            results.append(
+            raw.append(
                 {
                     "id": str(item.get("_id", "")),
-                    "name": str(item.get("name", "Untitled Folder")),
-                    "parent_id": str(item.get("parentId", "")),
-                    "workspace_id": workspace_id,
+                    "full": str(item.get("name", "Untitled Folder")).strip("/"),
+                    "explicit_parent": str(item.get("parent") or item.get("parentId") or ""),
                 }
             )
+
+    path_to_id = {entry["full"]: entry["id"] for entry in raw if entry["full"] and entry["id"]}
+    results = [{"id": "", "name": "Top level", "parent_id": "", "workspace_id": workspace_id}]
+    for entry in raw:
+        if not entry["id"]:
+            continue
+        segments = entry["full"].split("/") if entry["full"] else []
+        display_name = segments[-1] if segments else "Untitled Folder"
+        parent_id = entry["explicit_parent"]
+        if not parent_id and len(segments) > 1:
+            parent_id = path_to_id.get("/".join(segments[:-1]), "")
+        results.append(
+            {
+                "id": entry["id"],
+                "name": display_name or "Untitled Folder",
+                "parent_id": parent_id,
+                "workspace_id": workspace_id,
+            }
+        )
     return results
 
 

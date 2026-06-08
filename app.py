@@ -740,6 +740,7 @@ def render_page() -> bytes:
 
       .modal-card.fx-modal {{
         width: min(980px, 100%);
+        height: min(640px, 86vh);
         max-height: 86vh;
         display: flex;
         flex-direction: column;

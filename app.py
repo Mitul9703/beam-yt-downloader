@@ -738,9 +738,9 @@ def render_page() -> bytes:
       }}
       .trint-dest-value.is-new {{ background: #e7f6ef; border-color: #bfe6d2; }}
 
-      .fx-modal {{
+      .modal-card.fx-modal {{
         width: min(980px, 100%);
-        max-height: 90vh;
+        max-height: 86vh;
         display: flex;
         flex-direction: column;
         padding: 0;
@@ -772,9 +772,12 @@ def render_page() -> bytes:
       }}
       .fx-crumb.current {{ color: var(--ink); cursor: default; }}
       .fx-list {{
-        flex: 1; overflow: auto; min-height: 320px; max-height: 52vh;
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
         background: #fff;
       }}
+      .fx-head, .fx-toolbar, .fx-onlyfolders, .fx-footer {{ flex: 0 0 auto; }}
       .fx-row {{
         display: flex; align-items: center; gap: 12px;
         padding: 12px 24px; border-bottom: 1px solid #f0ece4;

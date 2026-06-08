@@ -816,6 +816,13 @@ def render_page() -> bytes:
         padding: 48px 24px; color: var(--muted);
       }}
       .fx-empty {{ padding: 28px 24px; color: var(--muted); }}
+      .fx-onlyfolders {{
+        padding: 10px 24px;
+        background: var(--gold-soft);
+        border-bottom: 1px solid var(--line-soft);
+        color: #6b5a16;
+        font-size: 0.85rem;
+      }}
 
       .modal-backdrop {{
         position: fixed;
@@ -1082,12 +1089,13 @@ def render_page() -> bytes:
             <button id="newFolderBtn" class="secondary" type="button">&#43; New folder here</button>
           </div>
         </div>
+        <div class="fx-onlyfolders">Only folders are shown — open a folder to go inside it, then choose where your file should be uploaded.</div>
         <div id="trintFxList" class="fx-list"></div>
         <div class="fx-footer">
-          <div class="fx-footer-dest">Selected: <b id="trintSelectedLabel">nothing yet</b></div>
+          <div class="fx-footer-dest">Upload to: <b id="trintSelectedLabel">Home</b></div>
           <div class="fx-footer-actions">
             <button id="cancelTrintModalBtn" class="secondary" type="button">Cancel</button>
-            <button id="useTrintFolderBtn" type="button" disabled>Use this folder</button>
+            <button id="useTrintFolderBtn" type="button">Use this folder</button>
           </div>
         </div>
       </div>
@@ -1149,9 +1157,8 @@ def render_page() -> bytes:
 
       // ---- Trint destination state ----
       let trintTree = {{ folders: [], files: [], workspace_id: "" }};
-      let trintCwd = "";           // folder id currently shown in the picker
-      let trintSelected = null;    // {{kind:"folder", id, name}} | {{kind:"pending"}}
-      let trintPending = null;     // {{parent_id, parent_name, name}} draft folder
+      let trintCwd = "";           // folder id currently shown (the destination); "" = Home
+      let trintPending = null;     // {{parent_id, name}} draft folder being created
       let trintDestination = null; // committed destination
       let trintTreeLoaded = false;
 
@@ -1163,24 +1170,20 @@ def render_page() -> bytes:
         return (trintTree.folders || []).find((f) => (f.id || "") === (id || "")) || null;
       }}
       function folderDisplayName(id) {{
-        if (!id) return "Top level";
+        if (!id) return "Home";
         return folderById(id)?.name || "Folder";
       }}
       function childFolders(parentId) {{
         return (trintTree.folders || []).filter((f) => (f.parent_id || "") === (parentId || ""));
       }}
-      function filesIn(folderId) {{
-        return (trintTree.files || []).filter((f) => (f.folder_id || "") === (folderId || ""));
-      }}
 
       function destinationLabel(dest) {{
         if (!dest) return "No folder chosen yet";
-        const space = dest.workspace_name || "My Drive";
         if (dest.mode === "new") {{
-          const where = dest.parent_name && dest.parent_name !== "Top level" ? `${{space}} / ${{dest.parent_name}}` : space;
-          return `${{where}} / ${{dest.name}} (new)`;
+          const parent = dest.parent_name && dest.parent_name !== "Home" ? dest.parent_name + " / " : "";
+          return `${{parent}}${{dest.name}} (new)`;
         }}
-        return `${{space}} / ${{dest.folder_name || "Top level"}}`;
+        return dest.folder_name || "Home";
       }}
 
       function fillSelect(selectId, items, selectedId) {{
@@ -1220,12 +1223,12 @@ def render_page() -> bytes:
             workspace_id: data.settings.workspace_id || "",
             workspace_name: data.settings.workspace_name || "My Drive",
             folder_id: data.settings.folder_id || "",
-            folder_name: data.settings.folder_name || "Top level",
+            folder_name: data.settings.folder_name || "Home",
           }};
         }} else if (data.settings.configured) {{
           trintDestination = {{
             mode: "existing", workspace_id: "", workspace_name: "My Drive",
-            folder_id: "", folder_name: "Top level",
+            folder_id: "", folder_name: "Home",
           }};
         }}
         renderTrintInline();
@@ -1254,7 +1257,7 @@ def render_page() -> bytes:
       function renderBreadcrumbs() {{
         const holder = document.getElementById("trintBreadcrumbs");
         holder.innerHTML = "";
-        const chain = [{{ id: "", name: workspaceNameFor(trintTree.workspace_id) }}];
+        const chain = [{{ id: "", name: "Home" }}];
         const stack = [];
         let walker = trintCwd;
         while (walker) {{
@@ -1264,16 +1267,18 @@ def render_page() -> bytes:
           walker = f.parent_id || "";
         }}
         stack.reverse().forEach((c) => chain.push(c));
+        if (trintPending) chain.push({{ id: "__pending__", name: (trintPending.name || "New folder"), pending: true }});
         chain.forEach((crumb, index) => {{
+          const last = index === chain.length - 1;
           const button = document.createElement("button");
           button.type = "button";
-          button.className = "fx-crumb" + (index === chain.length - 1 ? " current" : "");
-          button.textContent = crumb.name;
-          if (index !== chain.length - 1) {{
-            button.addEventListener("click", () => {{ trintCwd = crumb.id; trintSelected = null; renderTrintModal(); }});
+          button.className = "fx-crumb" + (last ? " current" : "");
+          button.textContent = crumb.name + (crumb.pending ? " (new)" : "");
+          if (!last) {{
+            button.addEventListener("click", () => {{ trintCwd = crumb.id; trintPending = null; renderTrintModal(); }});
           }}
           holder.appendChild(button);
-          if (index < chain.length - 1) {{
+          if (!last) {{
             const sep = document.createElement("span");
             sep.textContent = "/";
             holder.appendChild(sep);
@@ -1281,130 +1286,70 @@ def render_page() -> bytes:
         }});
       }}
 
-      function isSelectedFolder(id) {{
-        return trintSelected && trintSelected.kind === "folder" && (trintSelected.id || "") === (id || "");
-      }}
-
       function renderTrintModal() {{
         fillSelect("trintSpaceSelect", trintWorkspaces, trintTree.workspace_id);
         renderBreadcrumbs();
-        document.getElementById("trintBackBtn").disabled = !trintCwd;
+        const pendingActive = !!trintPending;
+        document.getElementById("trintBackBtn").disabled = !trintCwd && !pendingActive;
+        document.getElementById("newFolderBtn").disabled = pendingActive;
         const list = document.getElementById("trintFxList");
         list.innerHTML = "";
 
-        // Select the current folder itself.
-        const hereRow = document.createElement("div");
-        hereRow.className = "fx-row here" + (isSelectedFolder(trintCwd) ? " selected" : "");
-        hereRow.innerHTML = `<div class="fx-icon">&#128205;</div><div class="fx-name">Upload into this folder <span class="fx-meta">(${{folderDisplayName(trintCwd)}})</span></div>`;
-        hereRow.addEventListener("click", () => {{
-          trintSelected = {{ kind: "folder", id: trintCwd, name: folderDisplayName(trintCwd) }};
-          renderTrintModal();
-        }});
-        list.appendChild(hereRow);
-
-        // Pending new folder for this location.
-        if (trintPending && (trintPending.parent_id || "") === (trintCwd || "")) {{
-          const row = document.createElement("div");
-          row.className = "fx-row" + (trintSelected && trintSelected.kind === "pending" ? " selected" : "");
-          const icon = document.createElement("div");
-          icon.className = "fx-icon";
-          icon.innerHTML = "&#128193;";
+        if (pendingActive) {{
+          // Name the new folder — it gets created in Trint when the download finishes.
+          const box = document.createElement("div");
+          box.style.padding = "20px 24px";
+          const lbl = document.createElement("label");
+          lbl.textContent = "Name your new folder";
+          box.appendChild(lbl);
           const input = document.createElement("input");
-          input.className = "fx-new-input";
+          input.id = "trintNewFolderInput";
           input.type = "text";
-          input.placeholder = "New folder name";
+          input.placeholder = "e.g. Board meetings";
           input.value = trintPending.name || "";
-          input.addEventListener("input", () => {{ trintPending.name = input.value; updateSelectedLabel(); }});
-          input.addEventListener("click", (e) => e.stopPropagation());
-          const badge = document.createElement("span");
-          badge.className = "fx-badge";
-          badge.textContent = "NEW";
-          const del = document.createElement("button");
-          del.type = "button";
-          del.className = "fx-open";
-          del.textContent = "Remove";
-          del.addEventListener("click", (e) => {{
-            e.stopPropagation();
-            trintPending = null;
-            if (trintSelected && trintSelected.kind === "pending") trintSelected = null;
-            renderTrintModal();
-          }});
-          row.appendChild(icon);
-          row.appendChild(input);
-          row.appendChild(badge);
-          row.appendChild(del);
-          row.addEventListener("click", () => {{ trintSelected = {{ kind: "pending" }}; updateSelectedLabel(); }});
-          list.appendChild(row);
+          input.style.maxWidth = "380px";
+          input.addEventListener("input", () => {{ trintPending.name = input.value; updateDestPreview(); }});
+          box.appendChild(input);
+          const hint = document.createElement("div");
+          hint.className = "mini-note";
+          hint.style.marginTop = "10px";
+          hint.textContent = `It will be created inside "${{folderDisplayName(trintCwd)}}" when your download finishes.`;
+          box.appendChild(hint);
+          list.appendChild(box);
           setTimeout(() => input.focus(), 0);
+        }} else {{
+          const subs = childFolders(trintCwd);
+          subs.forEach((folder) => {{
+            const row = document.createElement("div");
+            row.className = "fx-row";
+            row.innerHTML = `<div class="fx-icon">&#128193;</div><div class="fx-name">${{escapeHtml(folder.name)}}</div><div class="fx-meta">Open &rsaquo;</div>`;
+            row.addEventListener("click", () => {{ trintCwd = folder.id; renderTrintModal(); }});
+            list.appendChild(row);
+          }});
+          if (!subs.length) {{
+            const empty = document.createElement("div");
+            empty.className = "fx-empty";
+            empty.textContent = "No folders inside here. Upload into this folder, or create a new one.";
+            list.appendChild(empty);
+          }}
         }}
 
-        // Subfolders.
-        const subs = childFolders(trintCwd);
-        subs.forEach((folder) => {{
-          const row = document.createElement("div");
-          row.className = "fx-row" + (isSelectedFolder(folder.id) ? " selected" : "");
-          row.innerHTML = `<div class="fx-icon">&#128193;</div><div class="fx-name">${{escapeHtml(folder.name)}}</div>`;
-          row.addEventListener("click", () => {{
-            trintSelected = {{ kind: "folder", id: folder.id, name: folder.name }};
-            renderTrintModal();
-          }});
-          const open = document.createElement("button");
-          open.type = "button";
-          open.className = "fx-open";
-          open.textContent = "Open >";
-          open.addEventListener("click", (e) => {{
-            e.stopPropagation();
-            trintCwd = folder.id;
-            trintSelected = null;
-            renderTrintModal();
-          }});
-          row.appendChild(open);
-          list.appendChild(row);
-        }});
-
-        // Files (informational).
-        const filesHere = filesIn(trintCwd);
-        filesHere.forEach((file) => {{
-          const row = document.createElement("div");
-          row.className = "fx-row file";
-          row.innerHTML = `<div class="fx-icon">&#127897;</div><div class="fx-name">${{escapeHtml(file.name)}}</div><div class="fx-meta">${{escapeHtml(file.meta || "Trint file")}}</div>`;
-          list.appendChild(row);
-        }});
-
-        const isPersonal = !trintTree.workspace_id;
-        const hasPending = trintPending && (trintPending.parent_id || "") === (trintCwd || "");
-        if (isPersonal && trintCwd) {{
-          // Trint's API doesn't report which files live inside personal-drive folders.
-          const note = document.createElement("div");
-          note.className = "fx-empty";
-          note.innerHTML = "&#8505;&#65039; Trint doesn't show the files inside personal-drive folders here, but uploading still works — pick this folder and your download will be uploaded into it.";
-          list.appendChild(note);
-        }} else if (!subs.length && !filesHere.length && !hasPending) {{
-          const empty = document.createElement("div");
-          empty.className = "fx-empty";
-          empty.textContent = "This folder is empty. Use it as-is, or create a new folder here.";
-          list.appendChild(empty);
-        }}
-
-        updateSelectedLabel();
+        updateDestPreview();
       }}
 
-      function updateSelectedLabel() {{
+      function updateDestPreview() {{
         const label = document.getElementById("trintSelectedLabel");
         const useBtn = document.getElementById("useTrintFolderBtn");
-        if (!trintSelected) {{
-          label.textContent = "nothing yet";
-          useBtn.disabled = true;
-          return;
-        }}
-        useBtn.disabled = false;
-        const space = workspaceNameFor(trintTree.workspace_id);
-        if (trintSelected.kind === "pending") {{
-          const parent = folderDisplayName(trintPending ? trintPending.parent_id : "");
-          const where = parent !== "Top level" ? `${{space}} / ${{parent}}` : space;
-          label.textContent = `${{where}} / ${{(trintPending && trintPending.name) || "(name this folder)"}} (new)`;
+        if (trintPending) {{
+          const name = (trintPending.name || "").trim();
+          const here = folderDisplayName(trintCwd);
+          label.textContent = (here === "Home" ? "" : here + " / ") + (name || "(name your folder)") + " (new)";
+          useBtn.disabled = !name;
+          useBtn.textContent = "Create & use";
         }} else {{
-          label.textContent = `${{space}} / ${{trintSelected.name || "Top level"}}`;
+          label.textContent = folderDisplayName(trintCwd);
+          useBtn.disabled = false;
+          useBtn.textContent = "Use this folder";
         }}
       }}
 
@@ -1415,9 +1360,9 @@ def render_page() -> bytes:
         }}
         document.getElementById("trintFolderModal").classList.add("show");
         trintCwd = "";
-        trintSelected = null;
+        trintPending = null;
         if (!trintTreeLoaded) {{
-          setModalLoading("Loading your Trint folders and files...");
+          setModalLoading("Loading your Trint folders...");
           try {{
             await loadTrintTree(trintDestination?.workspace_id || "");
           }} catch (error) {{
@@ -1426,10 +1371,9 @@ def render_page() -> bytes:
             return;
           }}
         }}
-        if (trintDestination && trintDestination.mode === "existing" && trintDestination.folder_id) {{
-          const f = folderById(trintDestination.folder_id);
-          trintCwd = f ? (f.parent_id || "") : "";
-          trintSelected = {{ kind: "folder", id: trintDestination.folder_id, name: trintDestination.folder_name }};
+        // Re-open inside the previously chosen folder so it's the current location.
+        if (trintDestination && trintDestination.mode === "existing" && trintDestination.folder_id && folderById(trintDestination.folder_id)) {{
+          trintCwd = trintDestination.folder_id;
         }}
         renderTrintModal();
       }}
@@ -1759,9 +1703,12 @@ def render_page() -> bytes:
       }});
 
       document.getElementById("trintBackBtn").addEventListener("click", () => {{
-        const f = folderById(trintCwd);
-        trintCwd = f ? (f.parent_id || "") : "";
-        trintSelected = null;
+        if (trintPending) {{
+          trintPending = null;  // cancel the new folder, stay where we are
+        }} else {{
+          const f = folderById(trintCwd);
+          trintCwd = f ? (f.parent_id || "") : "";
+        }}
         renderTrintModal();
       }});
 
@@ -1771,19 +1718,18 @@ def render_page() -> bytes:
         runBusy(button, "Refreshing...", async () => {{
           await loadTrintTree(trintTree.workspace_id || "");
           trintCwd = folderById(keepCwd) ? keepCwd : "";
+          trintPending = null;
           renderTrintModal();
         }}).catch((error) => showBanner(error.message, "error"));
       }});
 
       document.getElementById("newFolderBtn").addEventListener("click", () => {{
-        trintPending = {{ parent_id: trintCwd, parent_name: folderDisplayName(trintCwd), name: "" }};
-        trintSelected = {{ kind: "pending" }};
+        trintPending = {{ parent_id: trintCwd, name: "" }};
         renderTrintModal();
       }});
 
       document.getElementById("trintSpaceSelect").addEventListener("change", async (event) => {{
         trintCwd = "";
-        trintSelected = null;
         trintPending = null;
         try {{
           await loadTrintTree(event.target.value);
@@ -1794,11 +1740,10 @@ def render_page() -> bytes:
       }});
 
       document.getElementById("useTrintFolderBtn").addEventListener("click", () => {{
-        if (!trintSelected) return;
         const spaceId = trintTree.workspace_id || "";
         const spaceName = workspaceNameFor(spaceId);
-        if (trintSelected.kind === "pending") {{
-          const name = ((trintPending && trintPending.name) || "").trim();
+        if (trintPending) {{
+          const name = (trintPending.name || "").trim();
           if (!name) {{
             showBanner("Type a name for the new folder first.", "error");
             return;
@@ -1807,23 +1752,25 @@ def render_page() -> bytes:
             mode: "new",
             workspace_id: spaceId,
             workspace_name: spaceName,
-            parent_id: (trintPending && trintPending.parent_id) || "",
-            parent_name: folderDisplayName((trintPending && trintPending.parent_id) || ""),
+            parent_id: trintCwd,
+            parent_name: folderDisplayName(trintCwd),
             name,
           }};
         }} else {{
+          const folderId = trintCwd;
+          const folderName = folderDisplayName(trintCwd);
           trintDestination = {{
             mode: "existing",
             workspace_id: spaceId,
             workspace_name: spaceName,
-            folder_id: trintSelected.id || "",
-            folder_name: trintSelected.name || "Top level",
+            folder_id: folderId,
+            folder_name: folderName,
           }};
           requestJson("/api/trint/destination/save", {{
             workspace_id: spaceId,
             workspace_name: spaceName,
-            folder_id: trintSelected.id || "",
-            folder_name: trintSelected.name || "Top level",
+            folder_id: folderId,
+            folder_name: folderName,
           }}).catch(() => null);
         }}
         renderTrintInline();
@@ -2103,10 +2050,10 @@ def build_trint_browse_payload(settings: TrintSettings, workspace_id: str, folde
         "selected_folder_name": current_folder_name,
         "workspaces": workspaces,
         "folders": [folder for folder in folders if folder.get("id")],
-        # Fetch the whole list (paginated) and let the client filter by folder.
-        "files": list_trint_files(settings, workspace_id, ""),
+        # The picker only chooses a destination folder; individual files aren't shown.
+        "files": [],
         "is_personal": not workspace_id,
-        "loading_label": "Folders and files loaded.",
+        "loading_label": "Folders loaded.",
     }
 
 

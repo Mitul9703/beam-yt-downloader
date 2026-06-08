@@ -91,6 +91,24 @@ class DownloadCancelled(RuntimeError):
     pass
 
 
+MIN_FREE_MB = 500
+
+
+def free_space_mb(folder: Path) -> int:
+    try:
+        return shutil.disk_usage(folder).free // (1024 * 1024)
+    except Exception:  # noqa: BLE001
+        return -1
+
+
+def ensure_free_space(folder: Path) -> None:
+    mb = free_space_mb(folder)
+    if 0 <= mb < MIN_FREE_MB:
+        raise RuntimeError(
+            f"Only {mb} MB free in the save folder. Free up some space and try again."
+        )
+
+
 def default_output_dir() -> Path:
     return Path.home() / "Downloads"
 
@@ -1059,7 +1077,10 @@ def render_page() -> bytes:
             <button id="trintBackBtn" class="secondary" type="button">&#8592; Back</button>
             <div id="trintBreadcrumbs" class="fx-breadcrumbs"></div>
           </div>
-          <button id="newFolderBtn" class="secondary" type="button">&#43; New folder here</button>
+          <div style="display:flex; gap:8px">
+            <button id="trintRefreshBtn" class="secondary" type="button">&#8635; Refresh</button>
+            <button id="newFolderBtn" class="secondary" type="button">&#43; New folder here</button>
+          </div>
         </div>
         <div id="trintFxList" class="fx-list"></div>
         <div class="fx-footer">
@@ -1342,15 +1363,23 @@ def render_page() -> bytes:
         }});
 
         // Files (informational).
-        filesIn(trintCwd).forEach((file) => {{
+        const filesHere = filesIn(trintCwd);
+        filesHere.forEach((file) => {{
           const row = document.createElement("div");
           row.className = "fx-row file";
           row.innerHTML = `<div class="fx-icon">&#127897;</div><div class="fx-name">${{escapeHtml(file.name)}}</div><div class="fx-meta">${{escapeHtml(file.meta || "Trint file")}}</div>`;
           list.appendChild(row);
         }});
 
+        const isPersonal = !trintTree.workspace_id;
         const hasPending = trintPending && (trintPending.parent_id || "") === (trintCwd || "");
-        if (!subs.length && !filesIn(trintCwd).length && !hasPending) {{
+        if (isPersonal && trintCwd) {{
+          // Trint's API doesn't report which files live inside personal-drive folders.
+          const note = document.createElement("div");
+          note.className = "fx-empty";
+          note.innerHTML = "&#8505;&#65039; Trint doesn't show the files inside personal-drive folders here, but uploading still works — pick this folder and your download will be uploaded into it.";
+          list.appendChild(note);
+        }} else if (!subs.length && !filesHere.length && !hasPending) {{
           const empty = document.createElement("div");
           empty.className = "fx-empty";
           empty.textContent = "This folder is empty. Use it as-is, or create a new folder here.";
@@ -1736,6 +1765,16 @@ def render_page() -> bytes:
         renderTrintModal();
       }});
 
+      document.getElementById("trintRefreshBtn").addEventListener("click", () => {{
+        const button = document.getElementById("trintRefreshBtn");
+        const keepCwd = trintCwd;
+        runBusy(button, "Refreshing...", async () => {{
+          await loadTrintTree(trintTree.workspace_id || "");
+          trintCwd = folderById(keepCwd) ? keepCwd : "";
+          renderTrintModal();
+        }}).catch((error) => showBanner(error.message, "error"));
+      }});
+
       document.getElementById("newFolderBtn").addEventListener("click", () => {{
         trintPending = {{ parent_id: trintCwd, parent_name: folderDisplayName(trintCwd), name: "" }};
         trintSelected = {{ kind: "pending" }};
@@ -1888,7 +1927,9 @@ def trint_request(
     query: dict[str, Any] | None = None,
     json_body: dict[str, Any] | None = None,
     raw_body: bytes | None = None,
+    body_path: Path | None = None,
     content_type: str | None = None,
+    timeout: int = 120,
 ) -> Any:
     if query:
         filtered = {key: value for key, value in query.items() if value not in (None, "")}
@@ -1897,15 +1938,23 @@ def trint_request(
 
     headers = trint_auth_headers(settings)
     data = raw_body
+    body_file = None
     if json_body is not None:
         data = json.dumps(json_body).encode("utf-8")
         headers["Content-Type"] = "application/json"
+    elif body_path is not None:
+        # Stream the file straight from disk instead of loading it all into RAM.
+        headers["Content-Length"] = str(body_path.stat().st_size)
+        if content_type:
+            headers["Content-Type"] = content_type
+        body_file = body_path.open("rb")
+        data = body_file
     elif content_type:
         headers["Content-Type"] = content_type
 
     request = Request(url, data=data, headers=headers, method=method)
     try:
-        with urlopen(request, timeout=120) as response:
+        with urlopen(request, timeout=timeout) as response:
             payload = response.read()
             response_type = response.headers.get("Content-Type", "")
     except HTTPError as exc:
@@ -1913,6 +1962,9 @@ def trint_request(
         raise RuntimeError(detail or f"Trint request failed with status {exc.code}.") from exc
     except URLError as exc:
         raise RuntimeError(f"Could not reach Trint. {exc.reason}") from exc
+    finally:
+        if body_file is not None:
+            body_file.close()
 
     if "application/json" in response_type and payload:
         return json.loads(payload.decode("utf-8"))
@@ -1968,18 +2020,19 @@ def list_trint_folders(settings: TrintSettings, workspace_id: str) -> list[dict[
     return results
 
 
-def list_trint_files(settings: TrintSettings, workspace_id: str, folder_id: str) -> list[dict[str, str]]:
-    query: dict[str, Any] = {"limit": 100, "skip": 0}
-    if workspace_id:
-        query["sharedDriveId"] = workspace_id
-    data = trint_request(
-        "GET",
-        "https://api.trint.com/transcripts/",
-        settings,
-        query=query,
-    )
+def list_trint_files(settings: TrintSettings, workspace_id: str, folder_id: str = "") -> list[dict[str, str]]:
+    page = 100
+    skip = 0
     results: list[dict[str, str]] = []
-    if isinstance(data, list):
+    while True:
+        query: dict[str, Any] = {"limit": page, "skip": skip}
+        if workspace_id:
+            query["sharedDriveId"] = workspace_id
+            if folder_id:
+                query["folderId"] = folder_id
+        data = trint_request("GET", "https://api.trint.com/transcripts/", settings, query=query)
+        if not isinstance(data, list) or not data:
+            break
         for item in data:
             if not isinstance(item, dict):
                 continue
@@ -1988,19 +2041,23 @@ def list_trint_files(settings: TrintSettings, workspace_id: str, folder_id: str)
             meta_parts = [part for part in [language, status] if part]
             folder_ref = (
                 item.get("folderId")
-                or item.get("folder_id")
                 or item.get("parentFolderId")
                 or (item.get("folder") or {}).get("_id")
                 or ""
             )
             results.append(
                 {
-                    "id": str(item.get("_id", "")),
+                    "id": str(item.get("id") or item.get("_id", "")),
                     "name": str(item.get("title", "Untitled File")),
-                    "folder_id": str(folder_ref),
+                    "folder_id": str(folder_ref or ""),
                     "meta": " • ".join(meta_parts) if meta_parts else "Trint file",
                 }
             )
+        if len(data) < page:
+            break
+        skip += page
+        if skip >= 5000:  # safety cap so a huge account can't loop forever
+            break
     return results
 
 
@@ -2025,7 +2082,9 @@ def build_trint_browse_payload(settings: TrintSettings, workspace_id: str, folde
         "selected_folder_name": current_folder_name,
         "workspaces": workspaces,
         "folders": [folder for folder in folders if folder.get("id")],
-        "files": list_trint_files(settings, workspace_id, folder_id),
+        # Fetch the whole list (paginated) and let the client filter by folder.
+        "files": list_trint_files(settings, workspace_id, ""),
+        "is_personal": not workspace_id,
         "loading_label": "Folders and files loaded.",
     }
 
@@ -2286,8 +2345,9 @@ def upload_file_to_trint(path: Path, settings: TrintSettings, workspace_id: str,
         "https://upload.trint.com/",
         settings,
         query=query,
-        raw_body=path.read_bytes(),
+        body_path=path,  # streamed from disk, not loaded into memory
         content_type=content_type,
+        timeout=1800,
     )
 
 
@@ -2549,6 +2609,9 @@ def download_playlist(job: DownloadJob, delay_seconds: int) -> None:
         raise RuntimeError("No downloadable videos were found in this playlist.")
 
     for index, entry in enumerate(entries, start=1):
+        if free_space_mb(folder) >= 0 and free_space_mb(folder) < MIN_FREE_MB:
+            job.log(f"Stopping early at item {index}: low disk space. Files already downloaded are kept.")
+            break
         video_url = build_video_url_from_entry(entry)
         item_title = entry.get("title") or f"Video {index}"
         if not video_url:
@@ -2672,6 +2735,7 @@ def queue_job(
         raise RuntimeError("The selected save folder does not exist.")
     if not chosen_dir.is_dir():
         raise RuntimeError("The selected save path is not a folder.")
+    ensure_free_space(chosen_dir)
     if upload_to_trint and not get_trint_settings().configured:
         raise RuntimeError("Save your Trint user key first before turning on Upload to Trint.")
 
@@ -2707,6 +2771,7 @@ def queue_job(
     job.log(f"Detected mode: {preview.detected_kind}")
     job.log(f"Media type: {media_type}")
     job.log(f"Save folder: {chosen_dir}")
+    job.log(f"Free space in save folder: {free_space_mb(chosen_dir)} MB")
     if upload_to_trint:
         drive = trint_workspace_name or "My Drive"
         if trint_new_folder:
@@ -3032,13 +3097,21 @@ class AppHandler(BaseHTTPRequestHandler):
             return
 
         content_type, _ = mimetypes.guess_type(str(target))
-        body = target.read_bytes()
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type or "application/octet-stream")
-        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Length", str(target.stat().st_size))
         self.send_header("Content-Disposition", f'attachment; filename="{target.name}"')
         self.end_headers()
-        self.wfile.write(body)
+        # Stream from disk in chunks instead of loading the whole file into memory.
+        try:
+            with target.open("rb") as handle:
+                while True:
+                    chunk = handle.read(1024 * 256)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def _send_html(self, body: bytes, status: HTTPStatus = HTTPStatus.OK) -> None:
         self._send_html_headers(body, status)

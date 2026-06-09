@@ -9,6 +9,7 @@ import re
 import shutil
 import socket
 import subprocess
+import tempfile
 import sys
 import threading
 import time
@@ -217,6 +218,7 @@ class DownloadJob:
     trint_folder_name: str = ""
     trint_new_folder: bool = False
     trint_parent_id: str = ""
+    quality: str = "best"
     status: str = "Queued"
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
@@ -923,6 +925,19 @@ def render_page() -> bytes:
                 </div>
               </div>
 
+              <div id="qualityRow">
+                <label for="qualitySelect">Video Quality</label>
+                <select id="qualitySelect">
+                  <option value="best" selected>Best available (highest)</option>
+                  <option value="2160">Up to 2160p (4K)</option>
+                  <option value="1440">Up to 1440p</option>
+                  <option value="1080">Up to 1080p</option>
+                  <option value="720">Up to 720p</option>
+                  <option value="480">Up to 480p</option>
+                </select>
+                <div class="mini-note">Defaults to the highest available. Output is always MP4.</div>
+              </div>
+
               <div>
                 <label for="outputDirInput">Save To Folder</label>
                 <div class="inline-actions">
@@ -1123,6 +1138,18 @@ def render_page() -> bytes:
 
       function currentMedia() {{
         return document.querySelector('input[name="media"]:checked').value;
+      }}
+
+      function currentQuality() {{
+        return document.getElementById("qualitySelect").value;
+      }}
+
+      function syncQualityRow() {{
+        // Quality only applies to video; dim it for audio-only.
+        const audioOnly = currentMedia() === "audio";
+        const row = document.getElementById("qualityRow");
+        document.getElementById("qualitySelect").disabled = audioOnly;
+        row.style.opacity = audioOnly ? "0.5" : "1";
       }}
 
       function escapeHtml(value) {{
@@ -1615,6 +1642,7 @@ def render_page() -> bytes:
             url,
             requested_mode: currentKind(),
             media_type: currentMedia(),
+            quality: currentQuality(),
             output_dir: document.getElementById("outputDirInput").value.trim(),
             upload_to_trint: document.getElementById("uploadToTrint").checked,
             trint_workspace_id: trintDestination?.workspace_id || "",
@@ -1837,6 +1865,11 @@ def render_page() -> bytes:
         }});
       }});
 
+      document.querySelectorAll('input[name="media"]').forEach((input) => {{
+        input.addEventListener("change", syncQualityRow);
+      }});
+
+      syncQualityRow();
       renderTrintInline();
       loadTrintSettings().catch(() => null);
       refreshState();
@@ -2283,22 +2316,40 @@ def collect_existing_outputs(folder: Path) -> list[str]:
     return results
 
 
-def trint_media_candidates(job: DownloadJob) -> list[Path]:
+AUDIO_EXTS = {".mp3", ".m4a", ".aac", ".wav", ".flac", ".opus", ".ogg"}
+VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".wmv"}
+
+
+def collect_trint_audio(job: DownloadJob) -> tuple[list[Path], list[Path]]:
+    """Trint always gets AUDIO. Returns (audio_files_to_upload, cleanup_paths).
+
+    If the download already produced audio (Audio or Audio+Video mode), upload
+    those files. For Video-only, extract audio into a temp folder just for the
+    upload (not saved to the user's folder) and return it for cleanup.
+    """
     folder = Path(job.output_dir) / sanitize_name(job.preview.title)
     if not folder.exists():
-        return []
+        return ([], [])
 
-    video_exts = {".mp4", ".mov", ".avi", ".wma"}
-    audio_exts = {".mp3", ".m4a", ".aac", ".wav", ".mp4"}
-    preferred_exts = audio_exts if job.media_type == "audio" else video_exts
+    files = [p for p in sorted(folder.rglob("*")) if p.is_file()]
+    audio = [p for p in files if p.suffix.lower() in AUDIO_EXTS]
+    if audio:
+        return (audio, [])
 
-    results: list[Path] = []
-    for file_path in sorted(folder.rglob("*")):
-        if not file_path.is_file():
-            continue
-        if file_path.suffix.lower() in preferred_exts:
-            results.append(file_path)
-    return results
+    videos = [p for p in files if p.suffix.lower() in VIDEO_EXTS]
+    if not videos:
+        return ([], [])
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix="beam-trint-"))
+    prepared: list[Path] = []
+    for video in videos:
+        if job.cancel_requested:
+            raise DownloadCancelled("Download cancelled.")
+        target = tmp_dir / f"{sanitize_name(video.stem)}.mp3"
+        job.set_status("Preparing audio for Trint")
+        extract_audio(video, job, audio_path=target)
+        prepared.append(target)
+    return (prepared, [tmp_dir])
 
 
 def upload_file_to_trint(path: Path, settings: TrintSettings, workspace_id: str, folder_id: str) -> dict[str, Any]:
@@ -2336,24 +2387,34 @@ def upload_job_outputs_to_trint(job: DownloadJob) -> None:
         job.trint_folder_name = created["name"]
         job.log(f"Created Trint folder: {created['name']}")
 
-    files = trint_media_candidates(job)
+    files, cleanup = collect_trint_audio(job)
     if not files:
-        raise RuntimeError("No Trint-compatible media files were found to upload.")
+        raise RuntimeError("No audio could be prepared to upload to Trint.")
 
-    total = len(files)
-    job.trint_uploaded_files = []
-    for index, path in enumerate(files, start=1):
-        if job.cancel_requested:
-            raise DownloadCancelled("Download cancelled.")
-        job.current_item_label = f"Trint upload {index} of {total}: {path.name}"
-        job.set_status(f"Uploading to Trint: {path.name}")
-        job.progress_percent = (index - 1) / total * 100
-        job.progress_label = f"Uploading to Trint • {index} of {total}"
-        upload_file_to_trint(path, settings, job.trint_workspace_id, job.trint_folder_id)
-        job.trint_uploaded_files.append(path.name)
-        job.log(f"Uploaded to Trint: {path.name}")
-    job.progress_percent = 100.0
-    job.progress_label = f"Uploaded to Trint • {total} file(s)"
+    try:
+        total = len(files)
+        job.trint_uploaded_files = []
+        for index, path in enumerate(files, start=1):
+            if job.cancel_requested:
+                raise DownloadCancelled("Download cancelled.")
+            job.current_item_label = f"Trint upload {index} of {total}: {path.name}"
+            job.set_status(f"Uploading audio to Trint: {path.name}")
+            job.progress_percent = (index - 1) / total * 100
+            job.progress_label = f"Uploading audio to Trint • {index} of {total}"
+            upload_file_to_trint(path, settings, job.trint_workspace_id, job.trint_folder_id)
+            job.trint_uploaded_files.append(path.name)
+            job.log(f"Uploaded audio to Trint: {path.name}")
+        job.progress_percent = 100.0
+        job.progress_label = f"Uploaded audio to Trint • {total} file(s)"
+    finally:
+        for path in cleanup:
+            try:
+                if path.is_dir():
+                    shutil.rmtree(path, ignore_errors=True)
+                else:
+                    path.unlink(missing_ok=True)
+            except Exception:  # noqa: BLE001
+                pass
 
 
 def build_output_template(folder: Path, base_name: str) -> str:
@@ -2372,9 +2433,16 @@ def add_media_args(command: list[str], media_type: str, job: DownloadJob) -> Non
     if media_type == "both" and not FFMPEG:
         raise RuntimeError("Audio + Video requires ffmpeg.")
 
-    command.extend(["-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b" if FFMPEG else "b[ext=mp4]/b"])
+    heights = {"2160": 2160, "1440": 1440, "1080": 1080, "720": 720, "480": 480}
+    height = heights.get(getattr(job, "quality", "best"))
+    cap = f"[height<={height}]" if height else ""
     if FFMPEG:
-        command.extend(["--merge-output-format", "mp4", "--remux-video", "mp4"])
+        # Prefer the best MP4 within the cap; the trailing /b guarantees something
+        # still downloads even if nothing matches the cap. No cap => highest available.
+        fmt = f"bv*[ext=mp4]{cap}+ba[ext=m4a]/b[ext=mp4]{cap}/bv*{cap}+ba/b{cap}" + ("/b" if cap else "")
+        command.extend(["-f", fmt, "--merge-output-format", "mp4", "--remux-video", "mp4"])
+    else:
+        command.extend(["-f", f"b[ext=mp4]{cap}/b[ext=mp4]/b"])
 
 
 def media_duration_seconds(path: Path) -> float | None:
@@ -2454,11 +2522,11 @@ def run_yt_dlp(command: list[str], job: DownloadJob) -> list[Path]:
         ACTIVE_PROCESSES.pop(job.id, None)
 
 
-def extract_audio(video_path: Path, job: DownloadJob) -> Path:
+def extract_audio(video_path: Path, job: DownloadJob, audio_path: Path | None = None) -> Path:
     if not FFMPEG:
         raise RuntimeError("ffmpeg is required for Audio + Video bundles.")
 
-    audio_path = video_path.with_suffix(".mp3")
+    audio_path = audio_path or video_path.with_suffix(".mp3")
     job.log(f"Extracting audio from {video_path.name}")
     duration = media_duration_seconds(video_path)
     process = subprocess.Popen(
@@ -2697,9 +2765,12 @@ def queue_job(
     trint_folder_name: str,
     trint_new_folder: bool = False,
     trint_parent_id: str = "",
+    quality: str = "best",
 ) -> DownloadJob:
     if media_type not in {"video", "audio", "both"}:
         raise RuntimeError("Choose Video, Audio, or Audio + Video.")
+    if quality not in {"best", "2160", "1440", "1080", "720", "480"}:
+        quality = "best"
     if media_type == "both" and not FFMPEG:
         raise RuntimeError("Audio + Video requires ffmpeg.")
     chosen_dir = Path(output_dir).expanduser() if output_dir else default_output_dir()
@@ -2728,6 +2799,7 @@ def queue_job(
         trint_folder_name=trint_folder_name,
         trint_new_folder=trint_new_folder,
         trint_parent_id=trint_parent_id,
+        quality=quality,
         log_path=str(job_log_file),
     )
 
@@ -2742,6 +2814,8 @@ def queue_job(
     job.log(f"Requested mode: {requested_mode}")
     job.log(f"Detected mode: {preview.detected_kind}")
     job.log(f"Media type: {media_type}")
+    if media_type != "audio":
+        job.log(f"Video quality: {'highest available' if quality == 'best' else 'up to ' + quality + 'p'}")
     job.log(f"Save folder: {chosen_dir}")
     job.log(f"Free space in save folder: {free_space_mb(chosen_dir)} MB")
     if upload_to_trint:
@@ -3025,6 +3099,7 @@ class AppHandler(BaseHTTPRequestHandler):
             trint_folder_name = str(payload.get("trint_folder_name", "")).strip()
             trint_new_folder = bool(payload.get("trint_new_folder", False))
             trint_parent_id = str(payload.get("trint_parent_id", "")).strip()
+            quality = str(payload.get("quality", "best")).strip()
             job = queue_job(
                 url,
                 requested_mode,
@@ -3037,6 +3112,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 trint_folder_name,
                 trint_new_folder,
                 trint_parent_id,
+                quality,
             )
             self._send_json({"job": serialize_job(job), "preview": asdict(job.preview)})
         except Exception as exc:  # noqa: BLE001

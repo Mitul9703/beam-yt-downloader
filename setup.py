@@ -25,6 +25,13 @@ if _missing:
 
 resource_entries = [("bin", _bundled)]
 
+# Bake in the team's shared-queue endpoint (gitignored, so the token never lands
+# in the public repo). Landing it in Resources/ means resource_root() finds it at
+# runtime. Optional: if absent, the app simply ships with the queue off.
+_queue_cfg = ROOT / "queue_config.json"
+if _queue_cfg.exists():
+    resource_entries.append(str(_queue_cfg))
+
 OPTIONS = {
     "argv_emulation": False,
     # Do NOT strip bundled binaries: stripping destroys the appended archive

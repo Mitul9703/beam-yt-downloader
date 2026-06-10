@@ -205,9 +205,36 @@ class QueueSettings:
         return self.url.rstrip("/")
 
 
-def get_queue_settings() -> QueueSettings:
-    """Shared-queue config (experimental, opt-in). A per-install client_id is
-    generated once and stored locally; it is random, not identifying."""
+def load_queue_defaults() -> tuple[str, str]:
+    """The team's shared-queue endpoint, baked into the app so teammates don't
+    configure anything.
+
+    Resolution order (most to least specific):
+      1. BEAM_QUEUE_URL / BEAM_QUEUE_TOKEN env vars  — for dev/testing or an
+         emergency override without rebuilding.
+      2. a bundled queue_config.json next to the app — the normal source. This
+         file is gitignored, so the team token never lands in the public repo;
+         it's added to the .app at build time. Change it (new Render account, or
+         a rotated token) and ship an update to roll it out.
+    Returns ("", "") when nothing is configured, which simply means the queue is
+    off and every download runs locally.
+    """
+    url = os.environ.get("BEAM_QUEUE_URL", "").strip()
+    token = os.environ.get("BEAM_QUEUE_TOKEN", "").strip()
+    if url and token:
+        return url, token
+    try:
+        cfg = json.loads((resource_root() / "queue_config.json").read_text("utf-8"))
+        if isinstance(cfg, dict):
+            url = url or str(cfg.get("url", "")).strip()
+            token = token or str(cfg.get("token", "")).strip()
+    except Exception:  # noqa: BLE001  (no/!invalid config simply means "queue off")
+        pass
+    return url, token
+
+
+def _ensure_queue_client_id() -> str:
+    """A per-install random id, generated once and stored locally. Not identifying."""
     raw = load_settings().get("queue", {})
     if not isinstance(raw, dict):
         raw = {}
@@ -219,23 +246,42 @@ def get_queue_settings() -> QueueSettings:
         queue["client_id"] = client_id
         data["queue"] = queue
         save_settings(data)
-    return QueueSettings(
-        url=str(raw.get("url", "")).strip(),
-        token=str(raw.get("token", "")).strip(),
-        client_id=client_id,
-    )
+    return client_id
 
 
-def save_queue_settings(url: str, token: str) -> QueueSettings:
+def queue_is_disabled() -> bool:
+    """User opt-out (per install) or an env kill-switch."""
+    if os.environ.get("BEAM_QUEUE_DISABLE") == "1":
+        return True
+    raw = load_settings().get("queue", {})
+    return bool(raw.get("disabled", False)) if isinstance(raw, dict) else False
+
+
+def queue_status() -> dict[str, bool]:
+    """For the UI — never exposes the token. 'configured' = a team server is
+    baked in; 'on' = configured and the user hasn't opted out."""
+    url, token = load_queue_defaults()
+    configured = bool(url and token)
+    return {"configured": configured, "on": configured and not queue_is_disabled()}
+
+
+def get_queue_settings() -> QueueSettings:
+    """The ACTIVE queue config. Empty url/token (i.e. disabled) when there is no
+    baked-in server or the user has opted out — callers then download locally."""
+    client_id = _ensure_queue_client_id()
+    if not queue_status()["on"]:
+        return QueueSettings(url="", token="", client_id=client_id)
+    url, token = load_queue_defaults()
+    return QueueSettings(url=url, token=token, client_id=client_id)
+
+
+def set_queue_enabled(enabled: bool) -> dict[str, bool]:
     data = load_settings()
     queue = data.get("queue", {}) if isinstance(data.get("queue"), dict) else {}
-    queue["url"] = url.strip()
-    queue["token"] = token.strip()
-    if not queue.get("client_id"):
-        queue["client_id"] = uuid.uuid4().hex
+    queue["disabled"] = not enabled
     data["queue"] = queue
     save_settings(data)
-    return get_queue_settings()
+    return queue_status()
 
 
 @dataclass
@@ -986,6 +1032,8 @@ def render_page() -> bytes:
       .update-actions {{ display: flex; gap: 10px; flex-wrap: wrap; }}
       .update-actions button {{ padding: 9px 16px; }}
       .gate-backdrop {{ background: rgba(22, 22, 22, 0.78); z-index: 50; }}
+      .queue-toggle {{ display: flex; align-items: center; gap: 9px; font-weight: 600; cursor: pointer; }}
+      .queue-toggle input {{ width: 16px; height: 16px; }}
       .update-notes {{
         white-space: pre-wrap;
         word-break: break-word;
@@ -1248,22 +1296,10 @@ def render_page() -> bytes:
           </div>
 
           <div class="tutorial">
-            <h3 style="margin:0 0 8px; font-size:1rem">Shared download queue (experimental)</h3>
-            <div class="mini-note" style="margin-bottom:12px">Optional. If your team set up a shared queue server, paste its address and team key here so downloads take turns. Leave blank to download normally on your own.</div>
-            <div class="inline-grid">
-              <div>
-                <label for="queueUrl">Queue server address</label>
-                <input id="queueUrl" type="text" placeholder="https://beam-queue.onrender.com">
-              </div>
-              <div>
-                <label for="queueToken">Team key</label>
-                <input id="queueToken" type="password" placeholder="Shared team key">
-              </div>
-            </div>
-            <div class="actions" style="margin-top:12px">
-              <button id="saveQueueBtn" type="button">Save queue settings</button>
-              <span id="queueStatus" class="mini-note" style="align-self:center"></span>
-            </div>
+            <h3 style="margin:0 0 8px; font-size:1rem">Shared download queue</h3>
+            <div class="mini-note" style="margin-bottom:12px">When several teammates download at the same time, the app quietly takes turns so YouTube doesn&rsquo;t see a burst from your shared network. It&rsquo;s already set up &mdash; nothing to enter. If the queue is ever unavailable, your download just runs normally on its own.</div>
+            <label class="queue-toggle"><input type="checkbox" id="queueEnabled"> Use the shared download queue</label>
+            <div id="queueStatus" class="mini-note" style="margin-top:8px"></div>
           </div>
 
           <div class="tutorial">
@@ -1468,10 +1504,7 @@ def render_page() -> bytes:
         trintSettingsState = data.settings;
         document.getElementById("trintKeyId").value = data.settings.key_id || "";
         document.getElementById("trintKeySecret").value = data.settings.key_secret || "";
-        const queue = data.queue || {{}};
-        document.getElementById("queueUrl").value = queue.url || "";
-        document.getElementById("queueToken").value = queue.token || "";
-        document.getElementById("queueStatus").textContent = queue.enabled ? "On — downloads take turns via the shared queue." : "Off — you download on your own.";
+        renderQueueStatus(data.queue || {{}});
         trintWorkspaces = data.workspaces || [{{ id: "", name: "My Drive" }}];
         if (data.settings.configured && data.settings.folder_id) {{
           trintDestination = {{
@@ -1986,16 +2019,28 @@ def render_page() -> bytes:
         }}).catch((error) => showBanner(error.message, "error"));
       }});
 
-      document.getElementById("saveQueueBtn").addEventListener("click", () => {{
-        const button = document.getElementById("saveQueueBtn");
-        const url = document.getElementById("queueUrl").value.trim();
-        const token = document.getElementById("queueToken").value.trim();
-        runBusy(button, "Saving...", async () => {{
-          const data = await requestJson("/api/queue/save", {{ url, token }});
-          const q = data.queue || {{}};
-          document.getElementById("queueStatus").textContent = q.enabled ? "On — downloads take turns via the shared queue." : "Off — you download on your own.";
-          showBanner(q.enabled ? "Shared queue connected." : "Shared queue turned off.", "success");
-        }}).catch((error) => showBanner(error.message, "error"));
+      function renderQueueStatus(queue) {{
+        const toggle = document.getElementById("queueEnabled");
+        const status = document.getElementById("queueStatus");
+        toggle.checked = !!queue.on;
+        toggle.disabled = !queue.configured;
+        if (!queue.configured) {{
+          status.textContent = "No shared queue is set up for your team yet — downloads run on their own.";
+        }} else {{
+          status.textContent = queue.on
+            ? "On — downloads take turns via your team's shared queue."
+            : "Off — you download on your own.";
+        }}
+      }}
+
+      document.getElementById("queueEnabled").addEventListener("change", (event) => {{
+        const enabled = event.target.checked;
+        requestJson("/api/queue/toggle", {{ enabled }})
+          .then((data) => {{
+            renderQueueStatus(data.queue || {{}});
+            showBanner(data.queue && data.queue.on ? "Shared queue turned on." : "Shared queue turned off.", "success");
+          }})
+          .catch((error) => showBanner(error.message, "error"));
       }});
 
       document.getElementById("toggleSecretBtn").addEventListener("click", () => {{
@@ -3715,12 +3760,11 @@ class AppHandler(BaseHTTPRequestHandler):
                 workspaces = list_trint_workspaces(settings) if settings.configured else [{"id": "", "name": "My Drive"}]
             except Exception:  # noqa: BLE001
                 workspaces = [{"id": "", "name": "My Drive"}]
-            queue = get_queue_settings()
             self._send_json(
                 {
                     "settings": serialize_trint_settings(settings),
                     "workspaces": workspaces,
-                    "queue": {"url": queue.url, "token": queue.token, "enabled": queue.enabled},
+                    "queue": queue_status(),  # {configured, on} — token never sent to the browser
                 }
             )
             return
@@ -3744,7 +3788,7 @@ class AppHandler(BaseHTTPRequestHandler):
             "/api/choose-folder",
             "/api/open-logs",
             "/api/update/install",
-            "/api/queue/save",
+            "/api/queue/toggle",
             "/api/trint/settings/save",
             "/api/trint/settings/clear",
             "/api/trint/workspaces",
@@ -3885,14 +3929,11 @@ class AppHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
             return
 
-        if parsed.path == "/api/queue/save":
+        if parsed.path == "/api/queue/toggle":
             try:
-                queue = save_queue_settings(
-                    str(payload.get("url", "")).strip(),
-                    str(payload.get("token", "")).strip(),
-                )
-                write_app_log(f"queue settings updated: enabled={queue.enabled} url={queue.base or '(none)'}")
-                self._send_json({"queue": {"url": queue.url, "token": queue.token, "enabled": queue.enabled}})
+                status = set_queue_enabled(bool(payload.get("enabled", True)))
+                write_app_log(f"shared queue {'ON' if status['on'] else 'OFF'} (configured={status['configured']})")
+                self._send_json({"queue": status})
             except Exception as exc:  # noqa: BLE001
                 self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
             return

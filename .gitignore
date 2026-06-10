@@ -9,3 +9,4 @@ bin/
 logs/
 .beam_downloader_settings.json
 .DS_Store
+queue_config.json

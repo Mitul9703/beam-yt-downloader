@@ -148,7 +148,42 @@ everywhere to the new repo for future releases.
 
 ---
 
-## 6. Adding Intel Macs or Windows (when a real user shows up)
+## 6. The shared queue's URL / team token
+
+The shared-download-queue endpoint is **baked into the app** so teammates never
+type anything. It is resolved at runtime in this order:
+
+1. `BEAM_QUEUE_URL` / `BEAM_QUEUE_TOKEN` env vars (dev/testing or emergency
+   override without rebuilding).
+2. a bundled `queue_config.json` (the normal source).
+
+`queue_config.json` is **gitignored** — the team token is never committed to the
+public repo. It lives only in your local working copy and inside the built
+`.app` (in `Contents/Resources/`). At build time `setup.py` copies it into the
+bundle automatically; if it's missing, the app just ships with the queue off.
+
+**To change the queue server (e.g. moving to a Beam Render account) or rotate a
+compromised token:**
+
+1. Edit `queue_config.json` locally:
+   ```json
+   { "url": "https://NEW-server.onrender.com", "token": "NEW-team-token" }
+   ```
+2. Rebuild and publish a new version (`./package-app.sh` + `./publish.sh vX.Y`).
+   Everyone picks it up through the auto-updater.
+3. If you're rotating because the **old token leaked**, change `TEAM_TOKEN` on
+   the Render service at the same time, and make the release **required**
+   (section 4) so stragglers can't keep using the old token.
+
+> The token sits inside the distributed `.app`, so treat it as low-sensitivity
+> (the queue server is coordination-only — it never sees URLs, files, or Trint
+> keys). "Rotate + required-update" is the recovery path if it's ever abused.
+
+A user can still opt out locally via Settings → "Use the shared download queue";
+the app always falls back to a normal local download when the queue is off or
+unreachable.
+
+## 7. Adding Intel Macs or Windows (when a real user shows up)
 
 - **Intel Macs:** either a `universal2` Mac build (one app that runs on both
   Apple Silicon and Intel — needs a universal Python + universal ffmpeg/node) or

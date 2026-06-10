@@ -1996,11 +1996,19 @@ def json_response(payload: dict[str, Any]) -> bytes:
 
 
 def parse_json_body(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
-    length = int(handler.headers.get("Content-Length", "0"))
-    raw = handler.rfile.read(length).decode("utf-8")
-    if not raw:
+    try:
+        length = int(handler.headers.get("Content-Length", "0"))
+    except (TypeError, ValueError):
+        length = 0
+    if length <= 0:
         return {}
-    return json.loads(raw)
+    raw = handler.rfile.read(length).decode("utf-8", errors="replace")
+    if not raw.strip():
+        return {}
+    parsed = json.loads(raw)
+    # Every endpoint treats the body as an object; coerce anything else to empty
+    # so a stray array/string/number can't crash a handler with AttributeError.
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def trint_auth_headers(settings: TrintSettings) -> dict[str, str]:
@@ -2250,11 +2258,23 @@ def build_video_url_from_entry(entry: dict[str, Any]) -> str:
     return ""
 
 
+def _is_youtube_host(hostname: str | None) -> bool:
+    """True only for real YouTube hosts, so look-alikes like youtube.com.evil.com fail."""
+    host = (hostname or "").lower()
+    return (
+        host == "youtu.be"
+        or host == "youtube.com"
+        or host.endswith(".youtube.com")
+        or host == "youtube-nocookie.com"
+        or host.endswith(".youtube-nocookie.com")
+    )
+
+
 def extract_video_id(url: str) -> str:
     parsed = urlparse(url)
-    if parsed.hostname == "youtu.be":
-        return parsed.path.strip("/")
-    if "youtube.com" in (parsed.hostname or ""):
+    if parsed.hostname and parsed.hostname.lower() == "youtu.be":
+        return parsed.path.strip("/").split("/", 1)[0]
+    if _is_youtube_host(parsed.hostname):
         if parsed.path == "/watch":
             params = parse_qs(parsed.query)
             return params.get("v", [""])[0]
@@ -2290,10 +2310,13 @@ def pick_thumbnail(data: dict[str, Any], entry: dict[str, Any] | None = None) ->
 
 
 def is_probable_youtube_url(url: str) -> bool:
-    u = url.strip().lower()
-    if not u.startswith(("http://", "https://")):
+    u = url.strip()
+    if not u.lower().startswith(("http://", "https://")):
         return False
-    return any(host in u for host in ("youtube.com/", "youtu.be/", "youtube-nocookie.com/"))
+    try:
+        return _is_youtube_host(urlparse(u).hostname)
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def friendly_ytdlp_error(raw: str) -> str:

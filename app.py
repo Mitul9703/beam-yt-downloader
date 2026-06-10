@@ -601,6 +601,19 @@ def render_page() -> bytes:
         min-height: 170px;
       }}
 
+      .details-loading {{
+        display: none;
+        align-items: center;
+        gap: 10px;
+        color: var(--muted);
+        font-weight: 600;
+        font-size: 0.96rem;
+      }}
+
+      .details-loading.show {{
+        display: flex;
+      }}
+
       .meta-grid {{
         display: grid;
         grid-template-columns: 140px 1fr;
@@ -928,15 +941,10 @@ def render_page() -> bytes:
 
               <div id="qualityRow">
                 <label for="qualitySelect">Video Quality</label>
-                <select id="qualitySelect">
+                <select id="qualitySelect" disabled>
                   <option value="best" selected>Best available (highest)</option>
-                  <option value="2160">Up to 2160p (4K)</option>
-                  <option value="1440">Up to 1440p</option>
-                  <option value="1080">Up to 1080p</option>
-                  <option value="720">Up to 720p</option>
-                  <option value="480">Up to 480p</option>
                 </select>
-                <div class="mini-note">Defaults to the highest available. Output is always MP4.</div>
+                <div id="qualityNote" class="mini-note">Paste a link first &mdash; available qualities will appear here.</div>
               </div>
 
               <div>
@@ -981,6 +989,7 @@ def render_page() -> bytes:
             <h2>Link Details</h2>
             <div class="details-box">
               <div id="detailsEmpty" class="help">Paste a YouTube link and the title, channel, link type, and item count will appear here.</div>
+              <div id="detailsLoading" class="details-loading"><span class="status-spinner show"></span><span>Reading link details&hellip;</span></div>
               <div id="detailsError" class="help" style="display:none; color:#b3261e; font-weight:600"></div>
               <div id="detailsContent" style="display:none">
                 <div class="meta-grid">
@@ -1127,6 +1136,7 @@ def render_page() -> bytes:
       let detailTimer = null;
       let lastDetailUrl = "";
       let detailsRequestToken = 0;
+      let hasPreview = false;
       let trintSettingsState = null;
       let trintWorkspaces = [];
       let trintExplorerState = null;
@@ -1165,11 +1175,20 @@ def render_page() -> bytes:
       }}
 
       function syncQualityRow() {{
-        // Quality only applies to video; dim it for audio-only.
+        // Quality only applies once we have a video preview, and not for audio-only.
         const audioOnly = currentMedia() === "audio";
         const row = document.getElementById("qualityRow");
-        document.getElementById("qualitySelect").disabled = audioOnly;
-        row.style.opacity = audioOnly ? "0.5" : "1";
+        const note = document.getElementById("qualityNote");
+        const disabled = !hasPreview || audioOnly;
+        document.getElementById("qualitySelect").disabled = disabled;
+        row.style.opacity = disabled ? "0.5" : "1";
+        if (!hasPreview) {{
+          note.textContent = "Paste a link first \\u2014 available qualities will appear here.";
+        }} else if (audioOnly) {{
+          note.textContent = "Quality applies to video only.";
+        }} else {{
+          note.textContent = "Defaults to the highest available. Output is always MP4.";
+        }}
       }}
 
       function escapeHtml(value) {{
@@ -1440,9 +1459,19 @@ def render_page() -> bytes:
         new Notification(title, {{ body }});
       }}
 
+      function showDetailsLoading() {{
+        document.getElementById("detailsEmpty").style.display = "none";
+        document.getElementById("detailsError").style.display = "none";
+        document.getElementById("detailsContent").style.display = "none";
+        document.getElementById("detailsLoading").classList.add("show");
+        hasPreview = false;
+        syncQualityRow();
+      }}
+
       function renderDetails(preview) {{
         document.getElementById("detailsEmpty").style.display = "none";
         document.getElementById("detailsError").style.display = "none";
+        document.getElementById("detailsLoading").classList.remove("show");
         document.getElementById("detailsContent").style.display = "block";
         document.getElementById("detailsTitle").textContent = preview.title || "-";
         document.getElementById("detailsChannel").textContent = preview.channel || "-";
@@ -1453,6 +1482,7 @@ def render_page() -> bytes:
         const detected = document.querySelector(`input[name="kind"][value="${{preview.detected_kind}}"]`);
         if (detected) detected.checked = true;
         // Populate the quality picker with this video's actual resolutions.
+        hasPreview = true;
         setQualityOptions(preview.available_heights || []);
         syncQualityRow();
       }}
@@ -1460,9 +1490,12 @@ def render_page() -> bytes:
       function clearDetails() {{
         document.getElementById("detailsEmpty").style.display = "block";
         document.getElementById("detailsError").style.display = "none";
+        document.getElementById("detailsLoading").classList.remove("show");
         document.getElementById("detailsContent").style.display = "none";
         document.getElementById("detailsWarning").textContent = "";
+        hasPreview = false;
         setQualityOptions([]);
+        syncQualityRow();
       }}
 
       function looksLikeYouTube(url) {{
@@ -1477,9 +1510,12 @@ def render_page() -> bytes:
       function renderDetailsError(message) {{
         document.getElementById("detailsEmpty").style.display = "none";
         document.getElementById("detailsContent").style.display = "none";
+        document.getElementById("detailsLoading").classList.remove("show");
         const err = document.getElementById("detailsError");
         err.style.display = "block";
         err.textContent = message;
+        hasPreview = false;
+        syncQualityRow();
       }}
 
       async function loadDetailsForUrl() {{
@@ -1490,11 +1526,18 @@ def render_page() -> bytes:
           return;
         }}
 
+        if (!looksLikeYouTube(url)) {{
+          lastDetailUrl = "";
+          renderDetailsError("That doesn't look like a YouTube link. Paste a youtube.com or youtu.be URL.");
+          return;
+        }}
+
         if (url === lastDetailUrl) {{
           return;
         }}
 
         const requestToken = ++detailsRequestToken;
+        showDetailsLoading();
         try {{
           const data = await requestJson("/api/preview", {{
             url,
@@ -1518,7 +1561,7 @@ def render_page() -> bytes:
         if (detailTimer) clearTimeout(detailTimer);
         detailTimer = setTimeout(() => {{
           loadDetailsForUrl();
-        }}, 450);
+        }}, 350);
       }}
 
       function renderJobs(state) {{

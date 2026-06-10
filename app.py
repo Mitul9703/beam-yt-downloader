@@ -187,6 +187,7 @@ class PreviewData:
     thumbnail_url: str = ""
     warning: str = ""
     effective_url: str = ""
+    available_heights: list[int] = field(default_factory=list)
 
 
 @dataclass
@@ -1144,6 +1145,25 @@ def render_page() -> bytes:
         return document.getElementById("qualitySelect").value;
       }}
 
+      function setQualityOptions(heights) {{
+        const sel = document.getElementById("qualitySelect");
+        const previous = sel.value || "best";
+        const dynamic = Array.isArray(heights) && heights.length > 0;
+        const list = dynamic ? heights : [2160, 1440, 1080, 720, 480];
+        sel.innerHTML = "";
+        const best = document.createElement("option");
+        best.value = "best";
+        best.textContent = "Best available (highest)";
+        sel.appendChild(best);
+        list.forEach((h) => {{
+          const option = document.createElement("option");
+          option.value = String(h);
+          option.textContent = dynamic ? `${{h}}p` : `Up to ${{h}}p`;
+          sel.appendChild(option);
+        }});
+        sel.value = [...sel.options].some((o) => o.value === previous) ? previous : "best";
+      }}
+
       function syncQualityRow() {{
         // Quality only applies to video; dim it for audio-only.
         const audioOnly = currentMedia() === "audio";
@@ -1432,6 +1452,9 @@ def render_page() -> bytes:
         // Auto-set the Link Type toggle to match what was detected.
         const detected = document.querySelector(`input[name="kind"][value="${{preview.detected_kind}}"]`);
         if (detected) detected.checked = true;
+        // Populate the quality picker with this video's actual resolutions.
+        setQualityOptions(preview.available_heights || []);
+        syncQualityRow();
       }}
 
       function clearDetails() {{
@@ -1439,6 +1462,7 @@ def render_page() -> bytes:
         document.getElementById("detailsError").style.display = "none";
         document.getElementById("detailsContent").style.display = "none";
         document.getElementById("detailsWarning").textContent = "";
+        setQualityOptions([]);
       }}
 
       function looksLikeYouTube(url) {{
@@ -2276,6 +2300,20 @@ def fetch_preview(url: str, requested_mode: str) -> PreviewData:
         item_count = 1
         thumbnail_url = pick_thumbnail(data)
 
+    # For a single video the (full) info already lists the real video resolutions,
+    # so the quality picker can show exactly what THIS video offers — at no extra
+    # cost. Playlists vary per video, so we leave this empty and fall back to caps.
+    available_heights: list[int] = []
+    if detected_kind == "single":
+        heights = {
+            int(fmt["height"])
+            for fmt in (data.get("formats") or [])
+            if isinstance(fmt, dict)
+            and fmt.get("height")
+            and fmt.get("vcodec") not in (None, "none")
+        }
+        available_heights = sorted((h for h in heights if h >= 144), reverse=True)
+
     return PreviewData(
         input_url=url,
         requested_mode=requested_mode,
@@ -2288,6 +2326,7 @@ def fetch_preview(url: str, requested_mode: str) -> PreviewData:
         thumbnail_url=thumbnail_url,
         warning=warning,
         effective_url=target,
+        available_heights=available_heights,
     )
 
 
@@ -2433,8 +2472,8 @@ def add_media_args(command: list[str], media_type: str, job: DownloadJob) -> Non
     if media_type == "both" and not FFMPEG:
         raise RuntimeError("Audio + Video requires ffmpeg.")
 
-    heights = {"2160": 2160, "1440": 1440, "1080": 1080, "720": 720, "480": 480}
-    height = heights.get(getattr(job, "quality", "best"))
+    quality = str(getattr(job, "quality", "best"))
+    height = int(quality) if quality.isdigit() else None
     cap = f"[height<={height}]" if height else ""
     if FFMPEG:
         # Prefer the best MP4 within the cap; the trailing /b guarantees something
@@ -2769,7 +2808,7 @@ def queue_job(
 ) -> DownloadJob:
     if media_type not in {"video", "audio", "both"}:
         raise RuntimeError("Choose Video, Audio, or Audio + Video.")
-    if quality not in {"best", "2160", "1440", "1080", "720", "480"}:
+    if quality != "best" and not quality.isdigit():
         quality = "best"
     if media_type == "both" and not FFMPEG:
         raise RuntimeError("Audio + Video requires ffmpeg.")

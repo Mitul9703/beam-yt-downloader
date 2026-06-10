@@ -82,7 +82,7 @@ FFPROBE = resolve_binary("ffprobe")
 PLAYLIST_DELAY_SECONDS = 3
 
 # --- Auto-update ---------------------------------------------------------
-APP_VERSION = "1.4"
+APP_VERSION = "1.5"
 GITHUB_REPO = "Mitul9703/beam-yt-downloader"
 UPDATE_ASSET = "BeamYouTubeDownloader-AppleSilicon.zip"
 UPDATE_CHECK_TTL = 600  # re-check GitHub at most every 10 minutes
@@ -930,6 +930,7 @@ def render_page() -> bytes:
       .update-sub {{ font-size: 0.9rem; color: var(--muted); }}
       .update-actions {{ display: flex; gap: 10px; flex-wrap: wrap; }}
       .update-actions button {{ padding: 9px 16px; }}
+      .gate-backdrop {{ background: rgba(22, 22, 22, 0.78); z-index: 50; }}
       .update-notes {{
         white-space: pre-wrap;
         word-break: break-word;
@@ -995,6 +996,21 @@ def render_page() -> bytes:
           <pre id="updateNotesBody" class="update-notes"></pre>
           <div style="margin-top:18px; display:flex; justify-content:flex-end">
             <button id="updateNotesInstallBtn" type="button">Install update</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="mandatoryGate" class="modal-backdrop gate-backdrop">
+        <div class="modal-card">
+          <div class="modal-header">
+            <h2 style="margin:0">&#128276; Update required</h2>
+          </div>
+          <p id="gateLead" class="help" style="margin:0 0 14px">A required update is available. Please install it to continue using the app.</p>
+          <pre id="gateNotes" class="update-notes"></pre>
+          <div id="gateStatus" class="update-sub" style="margin-top:12px"></div>
+          <div style="margin-top:18px; display:flex; gap:10px; justify-content:flex-end">
+            <a id="gateReleaseLink" href="#" target="_blank" class="secondary" style="display:none; text-decoration:none; padding:11px 18px; border-radius:10px">Open releases page</a>
+            <button id="gateInstallBtn" type="button">Install update &amp; restart</button>
           </div>
         </div>
       </div>
@@ -2076,12 +2092,52 @@ def render_page() -> bytes:
         bar.style.display = "flex";
       }}
 
+      function showMandatoryGate(info) {{
+        updateInfo = info;
+        document.getElementById("gateNotes").textContent =
+          (info.notes || "").replace(/<!--beam:mandatory-->/gi, "").trim() || "No release notes were provided.";
+        const installBtn = document.getElementById("gateInstallBtn");
+        const link = document.getElementById("gateReleaseLink");
+        if (info.can_install) {{
+          installBtn.style.display = "inline-flex";
+          link.style.display = "none";
+        }} else {{
+          // Not installable here (e.g. running from source) — point to the page.
+          installBtn.style.display = "none";
+          link.style.display = "inline-flex";
+          link.href = info.release_url;
+          document.getElementById("gateLead").textContent =
+            "A required update is available. Open the releases page to install it.";
+        }}
+        document.getElementById("mandatoryGate").classList.add("show");
+      }}
+
       async function checkForUpdate() {{
         try {{
           const res = await fetch("/api/update/check");
           const info = await res.json();
-          if (info && info.update_available) showUpdateBar(info);
-        }} catch (e) {{ /* offline / GitHub unreachable — stay quiet */ }}
+          if (!info || !info.update_available) return;
+          // Fail-open: we only block when we positively confirmed a required update.
+          if (info.mandatory) showMandatoryGate(info);
+          else showUpdateBar(info);
+        }} catch (e) {{ /* offline / GitHub unreachable — never block, stay quiet */ }}
+      }}
+
+      async function startMandatoryInstall() {{
+        if (!updateInfo || !updateInfo.can_install) return;
+        const sub = document.getElementById("gateStatus");
+        const btn = document.getElementById("gateInstallBtn");
+        btn.disabled = true;
+        sub.textContent = "Starting update…";
+        try {{
+          const res = await fetch("/api/update/install", {{ method: "POST", headers: {{ "Content-Type": "application/json" }}, body: "{{}}" }});
+          const data = await res.json();
+          if (data.error) {{ sub.textContent = "Update failed: " + data.error; btn.disabled = false; return; }}
+          pollInstall(sub);
+        }} catch (e) {{
+          sub.textContent = "Update failed to start: " + (e.message || e);
+          btn.disabled = false;
+        }}
       }}
 
       function openUpdateNotes() {{
@@ -2148,6 +2204,8 @@ def render_page() -> bytes:
       document.getElementById("updateNotesModal").addEventListener("click", (e) => {{ if (e.target.id === "updateNotesModal") e.currentTarget.classList.remove("show"); }});
       document.getElementById("updateInstallBtn").addEventListener("click", (e) => startInstall(e.currentTarget));
       document.getElementById("updateNotesInstallBtn").addEventListener("click", (e) => startInstall(e.currentTarget));
+      document.getElementById("gateInstallBtn").addEventListener("click", startMandatoryInstall);
+      // The required-update gate is intentionally not dismissable (no close, backdrop click does nothing).
 
       syncQualityRow();
       renderTrintInline();
@@ -3234,6 +3292,11 @@ def version_is_newer(latest: str, current: str) -> bool:
     return parse_version(latest) > parse_version(current)
 
 
+def release_marks_mandatory(notes: str) -> bool:
+    """A release is required if its notes carry this invisible marker."""
+    return "<!--beam:mandatory-->" in (notes or "").lower()
+
+
 def current_bundle_path() -> Path | None:
     """Path to the running .app bundle, or None when running from source."""
     if not is_frozen():
@@ -3256,6 +3319,7 @@ def check_for_update(force: bool = False) -> dict[str, Any]:
         "current_version": APP_VERSION,
         "latest_version": "",
         "update_available": False,
+        "mandatory": False,
         "notes": "",
         "release_url": f"https://github.com/{GITHUB_REPO}/releases/latest",
         "can_install": current_bundle_path() is not None,
@@ -3268,10 +3332,14 @@ def check_for_update(force: bool = False) -> dict[str, Any]:
         with urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         latest = str(data.get("tag_name", "") or "")
+        notes = str(data.get("body", "") or "")
         info["latest_version"] = latest
-        info["notes"] = str(data.get("body", "") or "")
+        info["notes"] = notes
         info["release_url"] = str(data.get("html_url", "") or info["release_url"])
         info["update_available"] = bool(latest) and version_is_newer(latest, APP_VERSION)
+        # A release is "required" when its notes carry this invisible marker.
+        # Only meaningful when there's actually a newer version to move to.
+        info["mandatory"] = info["update_available"] and release_marks_mandatory(notes)
         info["checked"] = True
     except Exception as exc:  # noqa: BLE001
         info["error"] = str(exc)

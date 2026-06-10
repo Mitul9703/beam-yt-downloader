@@ -81,6 +81,15 @@ FFMPEG = resolve_binary("ffmpeg")
 FFPROBE = resolve_binary("ffprobe")
 PLAYLIST_DELAY_SECONDS = 3
 
+# --- Auto-update ---------------------------------------------------------
+APP_VERSION = "1.4"
+GITHUB_REPO = "Mitul9703/beam-yt-downloader"
+UPDATE_ASSET = "BeamYouTubeDownloader-AppleSilicon.zip"
+UPDATE_CHECK_TTL = 600  # re-check GitHub at most every 10 minutes
+_UPDATE_LOCK = threading.Lock()
+_UPDATE_CACHE: dict[str, Any] = {"checked_at": 0.0, "info": None}
+UPDATE_PROGRESS: dict[str, str] = {"phase": "idle", "message": "", "error": ""}
+
 JOB_LOCK = threading.Lock()
 JOB_QUEUE: list["DownloadJob"] = []
 JOBS: dict[int, "DownloadJob"] = {}
@@ -897,6 +906,46 @@ def render_page() -> bytes:
         color: var(--ink);
       }}
 
+      .update-bar {{
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        margin: 0 0 18px;
+        padding: 14px 18px;
+        border: 1px solid var(--accent);
+        border-radius: 12px;
+        background: var(--gold-soft, #fff7da);
+      }}
+
+      .update-main {{ display: flex; align-items: center; gap: 12px; }}
+      .update-dot {{
+        width: 10px; height: 10px; border-radius: 50%;
+        background: var(--accent); flex: 0 0 10px;
+        box-shadow: 0 0 0 0 rgba(255, 198, 39, 0.6);
+        animation: pulse 1.6s infinite;
+      }}
+      .update-headline {{ font-weight: 700; color: var(--ink); }}
+      .update-sub {{ font-size: 0.9rem; color: var(--muted); }}
+      .update-actions {{ display: flex; gap: 10px; flex-wrap: wrap; }}
+      .update-actions button {{ padding: 9px 16px; }}
+      .update-notes {{
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: inherit;
+        font-size: 0.95rem;
+        line-height: 1.5;
+        color: var(--ink);
+        background: #faf7ee;
+        border: 1px solid var(--line-soft);
+        border-radius: 10px;
+        padding: 14px 16px;
+        max-height: 50vh;
+        overflow-y: auto;
+        margin: 0;
+      }}
+
       .downloads-box a {{
         color: var(--accent-dark);
         text-decoration: none;
@@ -922,6 +971,33 @@ def render_page() -> bytes:
         <h1>Beam YouTube Downloader</h1>
         <button id="openSettingsBtn" class="secondary" type="button" aria-label="Open settings" style="display:inline-flex; align-items:center; gap:8px; font-size:1rem; padding:11px 18px">&#9881;&#65039; Settings</button>
       </section>
+
+      <div id="updateBar" class="update-bar" style="display:none">
+        <div class="update-main">
+          <span class="update-dot"></span>
+          <div>
+            <div id="updateHeadline" class="update-headline">Update available</div>
+            <div id="updateSub" class="update-sub"></div>
+          </div>
+        </div>
+        <div class="update-actions">
+          <button id="updateNotesBtn" class="secondary" type="button">What&rsquo;s new</button>
+          <button id="updateInstallBtn" type="button">Install update</button>
+        </div>
+      </div>
+
+      <div id="updateNotesModal" class="modal-backdrop">
+        <div class="modal-card">
+          <div class="modal-header">
+            <h2 id="updateNotesTitle" style="margin:0">What&rsquo;s new</h2>
+            <button id="updateNotesClose" class="secondary modal-close" type="button" aria-label="Close">Close</button>
+          </div>
+          <pre id="updateNotesBody" class="update-notes"></pre>
+          <div style="margin-top:18px; display:flex; justify-content:flex-end">
+            <button id="updateNotesInstallBtn" type="button">Install update</button>
+          </div>
+        </div>
+      </div>
 
       <section class="layout">
         <section class="stack">
@@ -1979,11 +2055,106 @@ def render_page() -> bytes:
         input.addEventListener("change", syncQualityRow);
       }});
 
+      // ----- Auto-update -----
+      let updateInfo = null;
+
+      function showUpdateBar(info) {{
+        updateInfo = info;
+        const bar = document.getElementById("updateBar");
+        document.getElementById("updateHeadline").textContent =
+          `Update available: ${{info.latest_version}}`;
+        const installBtn = document.getElementById("updateInstallBtn");
+        if (info.can_install) {{
+          document.getElementById("updateSub").textContent =
+            `You're on ${{info.current_version}}. Click Install to update and restart automatically.`;
+          installBtn.style.display = "inline-flex";
+        }} else {{
+          document.getElementById("updateSub").textContent =
+            `You're on ${{info.current_version}}. Open the releases page to update.`;
+          installBtn.style.display = "none";
+        }}
+        bar.style.display = "flex";
+      }}
+
+      async function checkForUpdate() {{
+        try {{
+          const res = await fetch("/api/update/check");
+          const info = await res.json();
+          if (info && info.update_available) showUpdateBar(info);
+        }} catch (e) {{ /* offline / GitHub unreachable — stay quiet */ }}
+      }}
+
+      function openUpdateNotes() {{
+        if (!updateInfo) return;
+        document.getElementById("updateNotesTitle").textContent =
+          `What's new in ${{updateInfo.latest_version}}`;
+        document.getElementById("updateNotesBody").textContent =
+          (updateInfo.notes || "").trim() || "No release notes were provided.";
+        document.getElementById("updateNotesInstallBtn").style.display =
+          updateInfo.can_install ? "inline-flex" : "none";
+        document.getElementById("updateNotesModal").classList.add("show");
+      }}
+
+      async function startInstall(button) {{
+        if (!updateInfo) return;
+        if (!updateInfo.can_install) {{ window.open(updateInfo.release_url, "_blank"); return; }}
+        document.getElementById("updateNotesModal").classList.remove("show");
+        const bar = document.getElementById("updateBar");
+        document.getElementById("updateHeadline").textContent = "Updating…";
+        document.querySelector(".update-actions").style.display = "none";
+        const sub = document.getElementById("updateSub");
+        sub.textContent = "Starting update…";
+        try {{
+          const res = await fetch("/api/update/install", {{ method: "POST", headers: {{ "Content-Type": "application/json" }}, body: "{{}}" }});
+          const data = await res.json();
+          if (data.error) {{ sub.textContent = "Update failed: " + data.error; document.querySelector(".update-actions").style.display = "flex"; return; }}
+          pollInstall(sub);
+        }} catch (e) {{
+          sub.textContent = "Update failed to start: " + (e.message || e);
+          document.querySelector(".update-actions").style.display = "flex";
+        }}
+      }}
+
+      function pollInstall(sub) {{
+        let gone = 0;
+        const labels = {{ downloading: "Downloading the update…", installing: "Installing…", restarting: "Restarting the app — this page will reconnect in a moment." }};
+        const timer = setInterval(async () => {{
+          try {{
+            const res = await fetch("/api/update/status", {{ cache: "no-store" }});
+            const p = await res.json();
+            gone = 0;
+            if (p.phase === "error") {{ clearInterval(timer); sub.textContent = "Update failed: " + (p.error || "unknown error"); document.querySelector(".update-actions").style.display = "flex"; return; }}
+            sub.textContent = labels[p.phase] || p.message || "Working…";
+          }} catch (e) {{
+            // Server stopped responding = the app is restarting. Try to reconnect.
+            gone += 1;
+            sub.textContent = "Restarting the app — this page will reconnect automatically.";
+            if (gone >= 2) tryReconnect(timer, sub);
+          }}
+        }}, 1500);
+      }}
+
+      function tryReconnect(timer, sub) {{
+        const probe = setInterval(async () => {{
+          try {{
+            const res = await fetch("/api/update/check", {{ cache: "no-store" }});
+            if (res.ok) {{ clearInterval(probe); clearInterval(timer); location.reload(); }}
+          }} catch (e) {{ /* still down */ }}
+        }}, 2000);
+      }}
+
+      document.getElementById("updateNotesBtn").addEventListener("click", openUpdateNotes);
+      document.getElementById("updateNotesClose").addEventListener("click", () => document.getElementById("updateNotesModal").classList.remove("show"));
+      document.getElementById("updateNotesModal").addEventListener("click", (e) => {{ if (e.target.id === "updateNotesModal") e.currentTarget.classList.remove("show"); }});
+      document.getElementById("updateInstallBtn").addEventListener("click", (e) => startInstall(e.currentTarget));
+      document.getElementById("updateNotesInstallBtn").addEventListener("click", (e) => startInstall(e.currentTarget));
+
       syncQualityRow();
       renderTrintInline();
       loadTrintSettings().catch(() => null);
       refreshState();
       setInterval(refreshState, 2000);
+      checkForUpdate();
     </script>
   </body>
 </html>
@@ -3053,6 +3224,155 @@ def current_state() -> dict[str, Any]:
     }
 
 
+def parse_version(tag: str) -> tuple[int, ...]:
+    """'v1.3' / '1.10.2' -> tuple of ints for ordering. Empty -> (0,)."""
+    nums = re.findall(r"\d+", tag or "")
+    return tuple(int(n) for n in nums) if nums else (0,)
+
+
+def version_is_newer(latest: str, current: str) -> bool:
+    return parse_version(latest) > parse_version(current)
+
+
+def current_bundle_path() -> Path | None:
+    """Path to the running .app bundle, or None when running from source."""
+    if not is_frozen():
+        return None
+    exe = Path(sys.executable).resolve()
+    for parent in exe.parents:
+        if parent.suffix == ".app":
+            return parent
+    return None
+
+
+def check_for_update(force: bool = False) -> dict[str, Any]:
+    """Ask GitHub for the latest release. Cached for UPDATE_CHECK_TTL seconds."""
+    with _UPDATE_LOCK:
+        cached = _UPDATE_CACHE["info"]
+        fresh = cached and (time.time() - _UPDATE_CACHE["checked_at"] < UPDATE_CHECK_TTL)
+        if cached and fresh and not force:
+            return cached
+    info: dict[str, Any] = {
+        "current_version": APP_VERSION,
+        "latest_version": "",
+        "update_available": False,
+        "notes": "",
+        "release_url": f"https://github.com/{GITHUB_REPO}/releases/latest",
+        "can_install": current_bundle_path() is not None,
+        "checked": False,
+        "error": "",
+    }
+    try:
+        api = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+        req = Request(api, headers={"Accept": "application/vnd.github+json", "User-Agent": "BeamYTDownloader"})
+        with urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        latest = str(data.get("tag_name", "") or "")
+        info["latest_version"] = latest
+        info["notes"] = str(data.get("body", "") or "")
+        info["release_url"] = str(data.get("html_url", "") or info["release_url"])
+        info["update_available"] = bool(latest) and version_is_newer(latest, APP_VERSION)
+        info["checked"] = True
+    except Exception as exc:  # noqa: BLE001
+        info["error"] = str(exc)
+        write_app_log(f"update check failed: {exc}")
+    with _UPDATE_LOCK:
+        _UPDATE_CACHE["info"] = info
+        _UPDATE_CACHE["checked_at"] = time.time()
+    return info
+
+
+def _set_update_progress(phase: str, message: str = "", error: str = "") -> None:
+    UPDATE_PROGRESS.update({"phase": phase, "message": message, "error": error})
+
+
+# A self-contained swapper. It takes its four inputs as positional args ($1-$4)
+# so there is nothing for Python to interpolate (keeps shell $ and {} intact).
+UPDATER_SCRIPT = r"""#!/bin/bash
+APP_PID="$1"; NEW_APP="$2"; DEST="$3"; LOG="$4"
+exec >>"$LOG" 2>&1
+echo "[updater $(date)] waiting for pid $APP_PID to exit"
+for i in $(seq 1 120); do kill -0 "$APP_PID" 2>/dev/null || break; sleep 0.5; done
+BACKUP="${DEST}.old"
+rm -rf "$BACKUP"
+if mv "$DEST" "$BACKUP"; then
+  if ditto "$NEW_APP" "$DEST"; then
+    xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
+    rm -rf "$BACKUP"
+    echo "[updater] swapped OK, relaunching"
+    open "$DEST"
+  else
+    echo "[updater] install failed, restoring previous version"
+    rm -rf "$DEST"; mv "$BACKUP" "$DEST"; open "$DEST"
+  fi
+else
+  echo "[updater] could not replace bundle (permissions?), relaunching current"
+  open "$DEST"
+fi
+rm -rf "$(dirname "$NEW_APP")"
+"""
+
+
+def perform_self_update() -> None:
+    """Download the latest release and hand off to a detached swapper, then quit."""
+    try:
+        bundle = current_bundle_path()
+        if bundle is None:
+            raise RuntimeError("Auto-update only works from the installed app, not from source.")
+        info = check_for_update(force=True)
+        if info.get("error"):
+            raise RuntimeError(f"Couldn't reach GitHub to confirm the update: {info['error']}")
+        if not info.get("update_available"):
+            _set_update_progress("idle", "You're already on the latest version.")
+            return
+
+        tmp = Path(tempfile.mkdtemp(prefix="beam_update_"))
+        zip_path = tmp / "app.zip"
+        asset_url = f"https://github.com/{GITHUB_REPO}/releases/latest/download/{UPDATE_ASSET}"
+        _set_update_progress("downloading", f"Downloading {info.get('latest_version','update')}…")
+        req = Request(asset_url, headers={"User-Agent": "BeamYTDownloader"})
+        with urlopen(req, timeout=180) as resp, open(zip_path, "wb") as out:
+            shutil.copyfileobj(resp, out)
+        if zip_path.stat().st_size < 1_000_000:
+            raise RuntimeError("The downloaded update looked too small; aborting to stay safe.")
+
+        _set_update_progress("installing", "Installing the update…")
+        unz = tmp / "unzipped"
+        subprocess.run(["ditto", "-x", "-k", str(zip_path), str(unz)], check=True)
+        new_app = next(iter(sorted(unz.glob("*.app"))), None) or next(iter(sorted(unz.glob("**/*.app"))), None)
+        if new_app is None:
+            raise RuntimeError("The downloaded update looked incomplete (no app inside).")
+
+        LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        script = tmp / "swap.sh"
+        script.write_text(UPDATER_SCRIPT)
+        os.chmod(script, 0o755)
+        subprocess.Popen(
+            ["/bin/bash", str(script), str(os.getpid()), str(new_app), str(bundle), str(LOGS_DIR / "update.log")],
+            start_new_session=True,
+        )
+        _set_update_progress("restarting", "Update ready — restarting the app…")
+        write_app_log(f"self-update: handed off to swapper for {info.get('latest_version')}")
+        threading.Thread(target=_quit_after_delay, daemon=True).start()
+    except Exception as exc:  # noqa: BLE001
+        write_app_log(f"self-update failed: {exc}")
+        _set_update_progress("error", "", str(exc))
+
+
+def _quit_after_delay() -> None:
+    time.sleep(2.5)
+    os._exit(0)
+
+
+def start_update_install() -> dict[str, str]:
+    """Kick off the update in the background and return the current progress."""
+    if UPDATE_PROGRESS.get("phase") in {"downloading", "installing", "restarting"}:
+        return dict(UPDATE_PROGRESS)
+    _set_update_progress("downloading", "Starting update…")
+    threading.Thread(target=perform_self_update, daemon=True).start()
+    return dict(UPDATE_PROGRESS)
+
+
 class AppHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
@@ -3061,6 +3381,13 @@ class AppHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/state":
             self._send_json(current_state())
+            return
+        if parsed.path == "/api/update/check":
+            force = parse_qs(parsed.query).get("force", ["0"])[0] == "1"
+            self._send_json(check_for_update(force=force))
+            return
+        if parsed.path == "/api/update/status":
+            self._send_json(dict(UPDATE_PROGRESS))
             return
         if parsed.path == "/api/trint/settings":
             settings = get_trint_settings()
@@ -3094,6 +3421,7 @@ class AppHandler(BaseHTTPRequestHandler):
             "/api/cancel",
             "/api/choose-folder",
             "/api/open-logs",
+            "/api/update/install",
             "/api/trint/settings/save",
             "/api/trint/settings/clear",
             "/api/trint/workspaces",
@@ -3221,6 +3549,15 @@ class AppHandler(BaseHTTPRequestHandler):
                 LOGS_DIR.mkdir(parents=True, exist_ok=True)
                 subprocess.run(["open", str(LOGS_DIR)], check=False)
                 self._send_json({"path": str(LOGS_DIR)})
+            except Exception as exc:  # noqa: BLE001
+                self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if parsed.path == "/api/update/install":
+            try:
+                if current_bundle_path() is None:
+                    raise RuntimeError("Auto-update only works from the installed app.")
+                self._send_json({"progress": start_update_install()})
             except Exception as exc:  # noqa: BLE001
                 self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
             return

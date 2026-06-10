@@ -614,6 +614,20 @@ def render_page() -> bytes:
         display: flex;
       }}
 
+      .field-msg {{
+        margin-top: 6px;
+        font-size: 0.88rem;
+        font-weight: 600;
+      }}
+
+      .field-msg.error {{
+        color: #b3261e;
+      }}
+
+      .field-msg.ok {{
+        color: #1b7f3b;
+      }}
+
       .meta-grid {{
         display: grid;
         grid-template-columns: 140px 1fr;
@@ -918,6 +932,7 @@ def render_page() -> bytes:
               <div>
                 <label for="urlInput">YouTube Link</label>
                 <textarea id="urlInput" placeholder="Paste a YouTube video or playlist URL here"></textarea>
+                <div id="urlFieldMsg" class="field-msg" style="display:none"></div>
               </div>
 
               <div class="inline-grid">
@@ -944,6 +959,7 @@ def render_page() -> bytes:
                 <select id="qualitySelect" disabled>
                   <option value="best" selected>Best available (highest)</option>
                 </select>
+                <div id="qualityLoading" class="details-loading"><span class="status-spinner show"></span><span>Fetching available qualities&hellip;</span></div>
                 <div id="qualityNote" class="mini-note">Paste a link first &mdash; available qualities will appear here.</div>
               </div>
 
@@ -1459,13 +1475,33 @@ def render_page() -> bytes:
         new Notification(title, {{ body }});
       }}
 
+      function setUrlFieldMsg(text, tone) {{
+        const el = document.getElementById("urlFieldMsg");
+        if (!text) {{
+          el.style.display = "none";
+          el.textContent = "";
+          return;
+        }}
+        el.textContent = text;
+        el.className = `field-msg ${{tone || "error"}}`;
+        el.style.display = "block";
+      }}
+
+      function setQualityLoading(on) {{
+        document.getElementById("qualityLoading").classList.toggle("show", on);
+        document.getElementById("qualityNote").style.display = on ? "none" : "block";
+      }}
+
       function showDetailsLoading() {{
         document.getElementById("detailsEmpty").style.display = "none";
         document.getElementById("detailsError").style.display = "none";
         document.getElementById("detailsContent").style.display = "none";
         document.getElementById("detailsLoading").classList.add("show");
         hasPreview = false;
-        syncQualityRow();
+        setQualityLoading(true);
+        document.getElementById("qualitySelect").disabled = true;
+        document.getElementById("qualityRow").style.opacity = "0.5";
+        setUrlFieldMsg("");
       }}
 
       function renderDetails(preview) {{
@@ -1483,8 +1519,11 @@ def render_page() -> bytes:
         if (detected) detected.checked = true;
         // Populate the quality picker with this video's actual resolutions.
         hasPreview = true;
+        setQualityLoading(false);
         setQualityOptions(preview.available_heights || []);
         syncQualityRow();
+        const kindLabel = preview.detected_kind === "playlist" ? "playlist" : "video";
+        setUrlFieldMsg(`Looks good \\u2014 valid YouTube ${{kindLabel}}.`, "ok");
       }}
 
       function clearDetails() {{
@@ -1494,8 +1533,10 @@ def render_page() -> bytes:
         document.getElementById("detailsContent").style.display = "none";
         document.getElementById("detailsWarning").textContent = "";
         hasPreview = false;
+        setQualityLoading(false);
         setQualityOptions([]);
         syncQualityRow();
+        setUrlFieldMsg("");
       }}
 
       function looksLikeYouTube(url) {{
@@ -1515,7 +1556,9 @@ def render_page() -> bytes:
         err.style.display = "block";
         err.textContent = message;
         hasPreview = false;
+        setQualityLoading(false);
         syncQualityRow();
+        setUrlFieldMsg(message, "error");
       }}
 
       async function loadDetailsForUrl() {{
@@ -2265,6 +2308,12 @@ def friendly_ytdlp_error(raw: str) -> str:
         return "This video is private or members-only, so it can't be downloaded."
     if "sign in to confirm your age" in low or "age" in low and "restricted" in low:
         return "This video is age-restricted and can't be downloaded without signing in."
+    if "incomplete youtube id" in low or "looks truncated" in low or "truncated_id" in low:
+        return "This YouTube link looks incomplete or mistyped. Copy the full link again from your browser's address bar."
+    if "unable to extract" in low and "video id" in low:
+        return "Couldn't find a video in this link. Make sure it's a full YouTube video or playlist URL."
+    if "does not pass" in low or "not a valid" in low and "id" in low:
+        return "This YouTube link looks incomplete or mistyped. Copy the full link again from your browser's address bar."
     if "requested format is not available" in low or "no video formats" in low:
         return "No downloadable formats were found for this link."
     if any(s in low for s in ("getaddrinfo", "name resolution", "network is unreachable", "failed to resolve", "unable to download webpage")):

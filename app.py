@@ -14,6 +14,7 @@ import sys
 import threading
 import time
 import traceback
+import uuid
 import webbrowser
 import zipfile
 import base64
@@ -89,6 +90,12 @@ UPDATE_CHECK_TTL = 600  # re-check GitHub at most every 10 minutes
 _UPDATE_LOCK = threading.Lock()
 _UPDATE_CACHE: dict[str, Any] = {"checked_at": 0.0, "info": None}
 UPDATE_PROGRESS: dict[str, str] = {"phase": "idle", "message": "", "error": ""}
+
+# Shared-queue client tuning (experimental; only used when a queue is configured).
+QUEUE_POLL_SECONDS = 3          # how often a waiting client asks for its slot
+QUEUE_HEARTBEAT_SECONDS = 20    # keep-alive while actually downloading
+QUEUE_WAKE_WINDOW = 90          # seconds to allow a sleeping Render server to wake
+QUEUE_MAX_POLL_MISSES = 5       # consecutive poll failures before falling back to local
 
 JOB_LOCK = threading.Lock()
 JOB_QUEUE: list["DownloadJob"] = []
@@ -181,6 +188,54 @@ def save_trint_destination(workspace_id: str, workspace_name: str, folder_id: st
     settings.folder_name = folder_name
     save_trint_settings(settings)
     return settings
+
+
+@dataclass
+class QueueSettings:
+    url: str = ""
+    token: str = ""
+    client_id: str = ""
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.url and self.token)
+
+    @property
+    def base(self) -> str:
+        return self.url.rstrip("/")
+
+
+def get_queue_settings() -> QueueSettings:
+    """Shared-queue config (experimental, opt-in). A per-install client_id is
+    generated once and stored locally; it is random, not identifying."""
+    raw = load_settings().get("queue", {})
+    if not isinstance(raw, dict):
+        raw = {}
+    client_id = str(raw.get("client_id", "")).strip()
+    if not client_id:
+        client_id = uuid.uuid4().hex
+        data = load_settings()
+        queue = data.get("queue", {}) if isinstance(data.get("queue"), dict) else {}
+        queue["client_id"] = client_id
+        data["queue"] = queue
+        save_settings(data)
+    return QueueSettings(
+        url=str(raw.get("url", "")).strip(),
+        token=str(raw.get("token", "")).strip(),
+        client_id=client_id,
+    )
+
+
+def save_queue_settings(url: str, token: str) -> QueueSettings:
+    data = load_settings()
+    queue = data.get("queue", {}) if isinstance(data.get("queue"), dict) else {}
+    queue["url"] = url.strip()
+    queue["token"] = token.strip()
+    if not queue.get("client_id"):
+        queue["client_id"] = uuid.uuid4().hex
+    data["queue"] = queue
+    save_settings(data)
+    return get_queue_settings()
 
 
 @dataclass
@@ -1193,6 +1248,25 @@ def render_page() -> bytes:
           </div>
 
           <div class="tutorial">
+            <h3 style="margin:0 0 8px; font-size:1rem">Shared download queue (experimental)</h3>
+            <div class="mini-note" style="margin-bottom:12px">Optional. If your team set up a shared queue server, paste its address and team key here so downloads take turns. Leave blank to download normally on your own.</div>
+            <div class="inline-grid">
+              <div>
+                <label for="queueUrl">Queue server address</label>
+                <input id="queueUrl" type="text" placeholder="https://beam-queue.onrender.com">
+              </div>
+              <div>
+                <label for="queueToken">Team key</label>
+                <input id="queueToken" type="password" placeholder="Shared team key">
+              </div>
+            </div>
+            <div class="actions" style="margin-top:12px">
+              <button id="saveQueueBtn" type="button">Save queue settings</button>
+              <span id="queueStatus" class="mini-note" style="align-self:center"></span>
+            </div>
+          </div>
+
+          <div class="tutorial">
             <h3 style="margin:0 0 8px; font-size:1rem">Something not working?</h3>
             <div class="mini-note" style="margin-bottom:12px">Open the logs folder and send the most recent file to whoever set this up — it records what happened so problems can be fixed.</div>
             <button id="openLogsBtn" class="secondary" type="button">Open logs folder</button>
@@ -1394,6 +1468,10 @@ def render_page() -> bytes:
         trintSettingsState = data.settings;
         document.getElementById("trintKeyId").value = data.settings.key_id || "";
         document.getElementById("trintKeySecret").value = data.settings.key_secret || "";
+        const queue = data.queue || {{}};
+        document.getElementById("queueUrl").value = queue.url || "";
+        document.getElementById("queueToken").value = queue.token || "";
+        document.getElementById("queueStatus").textContent = queue.enabled ? "On — downloads take turns via the shared queue." : "Off — you download on your own.";
         trintWorkspaces = data.workspaces || [{{ id: "", name: "My Drive" }}];
         if (data.settings.configured && data.settings.folder_id) {{
           trintDestination = {{
@@ -1905,6 +1983,18 @@ def render_page() -> bytes:
         runBusy(button, "Opening...", async () => {{
           await requestJson("/api/open-logs", {{}});
           showBanner("Opened the logs folder.", "success");
+        }}).catch((error) => showBanner(error.message, "error"));
+      }});
+
+      document.getElementById("saveQueueBtn").addEventListener("click", () => {{
+        const button = document.getElementById("saveQueueBtn");
+        const url = document.getElementById("queueUrl").value.trim();
+        const token = document.getElementById("queueToken").value.trim();
+        runBusy(button, "Saving...", async () => {{
+          const data = await requestJson("/api/queue/save", {{ url, token }});
+          const q = data.queue || {{}};
+          document.getElementById("queueStatus").textContent = q.enabled ? "On — downloads take turns via the shared queue." : "Off — you download on your own.";
+          showBanner(q.enabled ? "Shared queue connected." : "Shared queue turned off.", "success");
         }}).catch((error) => showBanner(error.message, "error"));
       }});
 
@@ -3089,6 +3179,163 @@ def download_playlist(job: DownloadJob, delay_seconds: int) -> None:
             job.outputs = outputs
 
 
+def human_eta(seconds: Any) -> str:
+    try:
+        s = int(seconds)
+    except Exception:  # noqa: BLE001
+        return "a moment"
+    if s <= 0:
+        return "a moment"
+    if s < 60:
+        return f"{s}s"
+    return f"{s // 60}m"
+
+
+def queue_request(settings: QueueSettings, path: str, payload: dict[str, Any] | None = None,
+                  method: str = "POST", timeout: int = 15) -> dict[str, Any]:
+    url = f"{settings.base}{path}"
+    data = json.dumps(payload or {}).encode("utf-8") if method == "POST" else None
+    headers = {"Authorization": f"Bearer {settings.token}", "Content-Type": "application/json"}
+    request = Request(url, data=data, headers=headers, method=method)
+    with urlopen(request, timeout=timeout) as response:
+        body = response.read()
+    return json.loads(body.decode("utf-8")) if body else {}
+
+
+def queue_wake(settings: QueueSettings, job: DownloadJob) -> bool:
+    """Ping the (possibly sleeping) server until it answers, within a window.
+
+    Render free services take ~30-60s to wake; we keep trying and only give up
+    after QUEUE_WAKE_WINDOW so a cold start is never mistaken for an outage.
+    """
+    deadline = time.time() + QUEUE_WAKE_WINDOW
+    announced = False
+    unreachable = 0
+    while time.time() < deadline:
+        if job.cancel_requested:
+            return False
+        try:
+            queue_request(settings, "/ping", method="GET", timeout=10)
+            return True
+        except HTTPError as exc:
+            # 5xx usually means the server is still waking; 4xx means bad config.
+            if exc.code not in (500, 502, 503, 504):
+                job.log(f"Shared queue rejected the connection (HTTP {exc.code}) — downloading directly.")
+                return False
+        except URLError as exc:
+            reason = getattr(exc, "reason", None)
+            if isinstance(reason, (ConnectionRefusedError, socket.gaierror)):
+                unreachable += 1
+                if unreachable >= 3:  # wrong address / nothing listening — don't stall
+                    job.log("Shared queue address can't be reached — downloading directly.")
+                    return False
+            # otherwise (timeout) keep waiting for a cold start
+        except Exception:  # noqa: BLE001
+            pass
+        if not announced:
+            job.set_status("Connecting to the shared queue")
+            job.progress_label = "Waking the shared queue (up to a minute the first time)"
+            job.log("Waking the shared queue...")
+            announced = True
+        time.sleep(3)
+    job.log("Shared queue didn't respond in time — downloading directly.")
+    return False
+
+
+def start_heartbeat(settings: QueueSettings, ticket_id: str) -> threading.Event:
+    stop = threading.Event()
+
+    def beat() -> None:
+        while not stop.wait(QUEUE_HEARTBEAT_SECONDS):
+            try:
+                queue_request(settings, "/heartbeat", {"ticket_id": ticket_id}, timeout=10)
+            except Exception:  # noqa: BLE001
+                pass
+
+    threading.Thread(target=beat, daemon=True).start()
+    return stop
+
+
+def acquire_queue_slot(job: DownloadJob) -> tuple[str | None, threading.Event | None, float | None]:
+    """Block until the shared queue grants a slot. Returns (ticket, heartbeat_stop,
+    started_at). Returns (None, None, None) when the queue is disabled/unreachable
+    (the caller then just downloads locally). May raise DownloadCancelled."""
+    settings = get_queue_settings()
+    if not settings.enabled:
+        return (None, None, None)
+
+    if not queue_wake(settings, job):
+        if job.cancel_requested:
+            raise DownloadCancelled("Download cancelled.")
+        job.log("Shared queue did not respond — downloading directly.")
+        return (None, None, None)
+
+    try:
+        data = queue_request(settings, "/enqueue", {"client_id": settings.client_id})
+    except Exception as exc:  # noqa: BLE001
+        job.log(f"Could not join the shared queue ({exc}) — downloading directly.")
+        return (None, None, None)
+
+    ticket = data.get("ticket_id")
+    if not ticket:
+        return (None, None, None)
+    job.log(f"Joined the shared queue (ticket {ticket[:6]}).")
+    misses = 0
+    while True:
+        if job.cancel_requested:
+            try:
+                queue_request(settings, "/release", {"ticket_id": ticket}, timeout=10)
+            except Exception:  # noqa: BLE001
+                pass
+            raise DownloadCancelled("Download cancelled.")
+
+        if data.get("status") == "go":
+            job.log("Shared queue: slot granted, starting now.")
+            return (ticket, start_heartbeat(settings, ticket), time.time())
+
+        position = data.get("position")
+        job.set_status("Waiting in the shared queue")
+        job.progress_label = f"Queue position {position} • starts in about {human_eta(data.get('eta_seconds'))}"
+        time.sleep(QUEUE_POLL_SECONDS)
+        try:
+            data = queue_request(settings, "/poll", {"ticket_id": ticket})
+            misses = 0
+        except HTTPError as exc:
+            if exc.code == 404:  # server restarted / ticket expired — rejoin
+                job.log("Shared queue restarted — rejoining the line.")
+                try:
+                    data = queue_request(settings, "/enqueue", {"client_id": settings.client_id})
+                    ticket = data.get("ticket_id") or ticket
+                except Exception:  # noqa: BLE001
+                    job.log("Could not rejoin the shared queue — downloading directly.")
+                    return (None, None, None)
+            else:
+                misses += 1
+                if misses >= QUEUE_MAX_POLL_MISSES:
+                    job.log("Lost contact with the shared queue — downloading directly.")
+                    return (None, None, None)
+        except Exception:  # noqa: BLE001
+            misses += 1
+            if misses >= QUEUE_MAX_POLL_MISSES:
+                job.log("Lost contact with the shared queue — downloading directly.")
+                return (None, None, None)
+
+
+def release_queue_slot(job: DownloadJob, ticket: str | None, stop: threading.Event | None,
+                       started_at: float | None) -> None:
+    if stop is not None:
+        stop.set()
+    if not ticket:
+        return
+    settings = get_queue_settings()
+    duration = int(time.time() - started_at) if started_at else 0
+    try:
+        queue_request(settings, "/release", {"ticket_id": ticket, "duration_seconds": duration}, timeout=10)
+        job.log("Shared queue: slot released.")
+    except Exception:  # noqa: BLE001
+        pass  # server reclaims it on heartbeat timeout anyway
+
+
 def worker_loop() -> None:
     while True:
         job: DownloadJob | None = None
@@ -3100,8 +3347,12 @@ def worker_loop() -> None:
             time.sleep(0.25)
             continue
 
+        ticket: str | None = None
+        heartbeat_stop: threading.Event | None = None
+        slot_started: float | None = None
         try:
             job.log(f"Starting job #{job.id}: {job.preview.title}")
+            ticket, heartbeat_stop, slot_started = acquire_queue_slot(job)
             if job.preview.detected_kind == "playlist":
                 download_playlist(job, PLAYLIST_DELAY_SECONDS)
             else:
@@ -3124,6 +3375,7 @@ def worker_loop() -> None:
             job.log(f"Job failed: {exc}")
             job.log(traceback.format_exc().strip())
         finally:
+            release_queue_slot(job, ticket, heartbeat_stop, slot_started)
             job.active = False
             job.updated_at = time.time()
 
@@ -3463,10 +3715,12 @@ class AppHandler(BaseHTTPRequestHandler):
                 workspaces = list_trint_workspaces(settings) if settings.configured else [{"id": "", "name": "My Drive"}]
             except Exception:  # noqa: BLE001
                 workspaces = [{"id": "", "name": "My Drive"}]
+            queue = get_queue_settings()
             self._send_json(
                 {
                     "settings": serialize_trint_settings(settings),
                     "workspaces": workspaces,
+                    "queue": {"url": queue.url, "token": queue.token, "enabled": queue.enabled},
                 }
             )
             return
@@ -3490,6 +3744,7 @@ class AppHandler(BaseHTTPRequestHandler):
             "/api/choose-folder",
             "/api/open-logs",
             "/api/update/install",
+            "/api/queue/save",
             "/api/trint/settings/save",
             "/api/trint/settings/clear",
             "/api/trint/workspaces",
@@ -3626,6 +3881,18 @@ class AppHandler(BaseHTTPRequestHandler):
                 if current_bundle_path() is None:
                     raise RuntimeError("Auto-update only works from the installed app.")
                 self._send_json({"progress": start_update_install()})
+            except Exception as exc:  # noqa: BLE001
+                self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if parsed.path == "/api/queue/save":
+            try:
+                queue = save_queue_settings(
+                    str(payload.get("url", "")).strip(),
+                    str(payload.get("token", "")).strip(),
+                )
+                write_app_log(f"queue settings updated: enabled={queue.enabled} url={queue.base or '(none)'}")
+                self._send_json({"queue": {"url": queue.url, "token": queue.token, "enabled": queue.enabled}})
             except Exception as exc:  # noqa: BLE001
                 self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
             return

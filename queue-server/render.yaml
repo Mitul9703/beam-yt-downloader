@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: beam-queue
+    runtime: python
+    plan: free
+    rootDir: queue-server
+    buildCommand: ""
+    startCommand: python main.py
+    envVars:
+      - key: TEAM_TOKEN
+        sync: false          # set this in the Render dashboard (a long random secret)
+      - key: PER_IP_LIMIT
+        value: "2"
+      - key: QUEUE_SALT
+        generateValue: true  # Render generates a random salt

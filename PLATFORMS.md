@@ -183,6 +183,13 @@ A user can still opt out locally via Settings → "Use the shared download queue
 the app always falls back to a normal local download when the queue is off or
 unreachable.
 
+**Shipping with the queue OFF.** To release a build where the shared queue is
+inert for everyone (e.g. before it's been tested), simply **build without
+`queue_config.json` present** (move it aside first). With no bundled config the
+app reports the queue as "not set up yet," ships no token, and every download
+runs locally. To turn the queue on for the team later, restore the config and
+publish an update — the auto-updater rolls it out.
+
 ## 7. Adding Intel Macs or Windows (when a real user shows up)
 
 - **Intel Macs:** either a `universal2` Mac build (one app that runs on both

@@ -25,7 +25,7 @@ except ModuleNotFoundError:
     messagebox = None
 
 
-APP_TITLE = "Beam YouTube Downloader"
+APP_TITLE = "Beam Downloader"
 DEFAULT_DELAY_SECONDS = 3
 WINDOW_BG = "#2b2f31"
 CARD_BG = "#3a3f41"

@@ -12,7 +12,7 @@ cd "$(dirname "$0")"
 
 REPO="Mitul9703/beam-yt-downloader"
 TAG="${1:-v1.0}"
-ZIP="dist/BeamYouTubeDownloader-AppleSilicon.zip"
+ZIP="dist/BeamDownloader-AppleSilicon.zip"
 
 command -v gh >/dev/null || { echo "gh not installed."; exit 1; }
 gh auth status >/dev/null 2>&1 || { echo "Run 'gh auth login' first."; exit 1; }
@@ -33,7 +33,7 @@ if ! git remote get-url origin >/dev/null 2>&1; then
     git remote add origin "https://github.com/${REPO}.git"
   else
     gh repo create "$REPO" --public --source=. --remote=origin \
-      --description "Beam YouTube Downloader — local macOS app for journalists"
+      --description "Beam Downloader — local macOS app for journalists"
   fi
 fi
 git push -u origin main
@@ -43,7 +43,7 @@ if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
   gh release upload "$TAG" "$ZIP" --repo "$REPO" --clobber
 else
   gh release create "$TAG" "$ZIP" --repo "$REPO" \
-    --title "Beam YouTube Downloader ${TAG}" \
+    --title "Beam Downloader ${TAG}" \
     --notes "Apple Silicon (M1/M2/M3/M4) build. Install instructions are in INSTALL-README.txt inside the zip, or run the one-liner from the README."
 fi
 

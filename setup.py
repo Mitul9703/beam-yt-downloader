@@ -38,8 +38,8 @@ OPTIONS = {
     # inside the standalone (PyInstaller-built) yt-dlp and breaks it.
     "strip": False,
     "plist": {
-        "CFBundleName": "Beam YouTube Downloader",
-        "CFBundleDisplayName": "Beam YouTube Downloader",
+        "CFBundleName": "Beam Downloader",
+        "CFBundleDisplayName": "Beam Downloader",
         "CFBundleIdentifier": "org.beam.ytdownloader",
         "CFBundleShortVersionString": "0.1.0",
         "CFBundleVersion": "0.1.0",

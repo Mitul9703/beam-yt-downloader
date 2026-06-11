@@ -1,4 +1,4 @@
-# Building the Beam YouTube Downloader macOS app
+# Building the Beam Downloader macOS app
 
 The shipped app **is `app.py`** (the local web app). py2app wraps it into a `.app`
 that, when double-clicked, starts a local server on a free port and opens the UI
@@ -22,13 +22,13 @@ python3 -m venv .buildvenv
 ```bash
 rm -rf build dist
 .buildvenv/bin/python setup.py py2app
-# Result: "dist/Beam YouTube Downloader.app"  (~270 MB)
+# Result: "dist/Beam Downloader.app"  (~270 MB)
 ```
 
 ## Quick local sanity check
 
 ```bash
-EXE="dist/Beam YouTube Downloader.app/Contents/MacOS/Beam YouTube Downloader"
+EXE="dist/Beam Downloader.app/Contents/MacOS/Beam Downloader"
 YT_DOWNLOADER_PORT=8770 YT_DOWNLOADER_NO_BROWSER=1 "$EXE" &
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8770/   # expect 200
 ```
@@ -58,7 +58,7 @@ The `.app` is **unsigned**, so on another Mac macOS will block it
 - **Quick/free:** teammate right-clicks the app → **Open** → **Open** (only needed
   once). Tell them to do this; a normal double-click will be blocked.
 - **Proper:** code-sign + notarize with an Apple Developer account ($99/yr):
-  `codesign --deep --force --options runtime --sign "Developer ID Application: <you>" "dist/Beam YouTube Downloader.app"`
+  `codesign --deep --force --options runtime --sign "Developer ID Application: <you>" "dist/Beam Downloader.app"`
   then submit with `xcrun notarytool` and `xcrun stapler staple`. This gives a
   clean double-click experience and is recommended if more than a couple of people
   will use it.

@@ -1,4 +1,4 @@
-Beam YouTube Downloader — Install Guide (Apple Silicon Mac: M1/M2/M3/M4)
+Beam Downloader — Install Guide (Apple Silicon Mac: M1/M2/M3/M4)
 =======================================================================
 
 You do NOT need GitHub, git, or any account to use this. Pick ONE of the two
@@ -21,8 +21,8 @@ OPTION B — Manual (if you'd rather not use Terminal)
 ----------------------------------------------------
 1. UNZIP: Double-click the zip file you downloaded (it's usually in your
    "Downloads" folder). It turns into a folder called
-   "Beam YouTube Downloader (Mac)". Open that folder by double-clicking it.
-   Inside you'll see the app "Beam YouTube Downloader" and this README.
+   "Beam Downloader (Mac)". Open that folder by double-clicking it.
+   Inside you'll see the app "Beam Downloader" and this README.
 
 2. MOVE IT TO APPLICATIONS:
    a. Open a new Finder window (click the blue smiley "Finder" icon in the Dock,
@@ -30,12 +30,12 @@ OPTION B — Manual (if you'd rather not use Terminal)
    b. Find the "Applications" folder. It is in the left-hand sidebar of every
       Finder window. If you don't see it, click "Go" in the menu bar at the very
       top of the screen, then click "Applications".
-   c. Drag the "Beam YouTube Downloader" app icon into that Applications folder.
+   c. Drag the "Beam Downloader" app icon into that Applications folder.
    (This step is optional — you can also just run it from where it unzipped —
     but Applications is the tidy place for it.)
 
 3. OPEN IT THE FIRST TIME:
-   Double-click "Beam YouTube Downloader".
+   Double-click "Beam Downloader".
    macOS will pop up a warning that it "cannot be verified." This is expected —
    it's an in-house tool, not from the App Store. Click "Done" (NOT "Move to
    Trash").
@@ -45,7 +45,7 @@ OPTION B — Manual (if you'd rather not use Terminal)
       logo at the top-left of the screen, then "System Settings").
    b. In the left list, click "Privacy & Security".
    c. Scroll down to the "Security" section. You'll see a line that says
-      "Beam YouTube Downloader was blocked..." with an "Open Anyway" button.
+      "Beam Downloader was blocked..." with an "Open Anyway" button.
       Click "Open Anyway".
    d. Confirm with your Mac password or Touch ID, then click "Open".
    (On older versions of macOS you won't see "Open Anyway" — instead, find the
@@ -78,7 +78,7 @@ newer version is available.)
 
 
 Trouble opening it? As a last resort, paste this one line into Terminal:
-   xattr -dr com.apple.quarantine "/Applications/Beam YouTube Downloader.app"
+   xattr -dr com.apple.quarantine "/Applications/Beam Downloader.app"
 then double-click the app again.
 
 Questions? Ask the colleague who sent you this.

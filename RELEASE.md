@@ -27,7 +27,7 @@ REPO="Mitul9703/beam-yt-downloader"        # e.g. REPO="janedoe/beam-yt-download
 ```bash
 cd "/Users/mitulkrishna/Documents/BEAM/YTDownloader"
 git add -A
-git commit -m "Beam YouTube Downloader app + installer"
+git commit -m "Beam Downloader app + installer"
 git branch -M main
 git remote add origin https://github.com/Mitul9703/beam-yt-downloader.git
 git push -u origin main
@@ -38,14 +38,14 @@ git push -u origin main
 ```bash
 ./fetch-binaries.sh                              # once
 .buildvenv/bin/python setup.py py2app            # build the .app
-./package-app.sh                                 # -> dist/BeamYouTubeDownloader-AppleSilicon.zip
+./package-app.sh                                 # -> dist/BeamDownloader-AppleSilicon.zip
 ```
 
 ## 5. Create a Release and attach the zip (website, drag-and-drop)
 1. On your repo page: **Releases** (right side) → **Draft a new release**.
 2. **Choose a tag** → type `v1.0` → "Create new tag on publish".
-3. Title: `Beam YouTube Downloader v1.0`.
-4. **Drag `dist/BeamYouTubeDownloader-AppleSilicon.zip` into the "Attach binaries" box.**
+3. Title: `Beam Downloader v1.0`.
+4. **Drag `dist/BeamDownloader-AppleSilicon.zip` into the "Attach binaries" box.**
    Wait for the 123 MB upload to finish.
 5. Click **Publish release**.
 

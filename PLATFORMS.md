@@ -1,6 +1,6 @@
 # Platforms, releases, and migration playbook
 
-This is the operational playbook for releasing Beam YouTube Downloader, adding
+This is the operational playbook for releasing Beam Downloader, adding
 new platforms later, moving the project to a different GitHub account, and
 shipping a **required** ("you must update to keep using the app") release.
 
@@ -15,7 +15,7 @@ rules keep the in-app auto-updater working for everyone.
    downloads a file named exactly:
 
    ```
-   BeamYouTubeDownloader-AppleSilicon.zip
+   BeamDownloader-AppleSilicon.zip
    ```
 
    from the *latest* release. Rename or remove it and existing apps can't
@@ -41,9 +41,9 @@ One release, one zip per supported platform:
 
 | Platform                     | Asset filename                          | Built today? |
 |------------------------------|------------------------------------------|--------------|
-| macOS Apple Silicon (arm64)  | `BeamYouTubeDownloader-AppleSilicon.zip` | ✅ yes        |
-| macOS Intel (x86_64)         | `BeamYouTubeDownloader-Intel.zip`        | ❌ not yet    |
-| Windows                      | `BeamYouTubeDownloader-Windows.zip`      | ❌ not yet    |
+| macOS Apple Silicon (arm64)  | `BeamDownloader-AppleSilicon.zip` | ✅ yes        |
+| macOS Intel (x86_64)         | `BeamDownloader-Intel.zip`        | ❌ not yet    |
+| Windows                      | `BeamDownloader-Windows.zip`      | ❌ not yet    |
 
 These names are a commitment. If you add Intel/Windows builds later, use exactly
 these names so the convention stays stable.

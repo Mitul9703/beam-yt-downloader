@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Beam YouTube Downloader — one-command installer for Apple Silicon Macs.
+# Beam Downloader — one-command installer for Apple Silicon Macs.
 #
 # Teammates run (nothing to install, no git, no GitHub account):
 #
@@ -13,9 +13,9 @@ REPO="Mitul9703/beam-yt-downloader"
 
 set -euo pipefail
 
-ASSET="BeamYouTubeDownloader-AppleSilicon.zip"
+ASSET="BeamDownloader-AppleSilicon.zip"
 URL="https://github.com/${REPO}/releases/latest/download/${ASSET}"
-APP_NAME="Beam YouTube Downloader.app"
+APP_NAME="Beam Downloader.app"
 DEST="/Applications/${APP_NAME}"
 
 if [ "$(uname -m)" != "arm64" ]; then
@@ -27,7 +27,7 @@ fi
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-echo "Downloading Beam YouTube Downloader..."
+echo "Downloading Beam Downloader..."
 curl -L --fail --progress-bar -o "$TMP/app.zip" "$URL"
 
 echo "Installing into Applications..."

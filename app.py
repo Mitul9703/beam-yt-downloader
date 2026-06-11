@@ -83,9 +83,9 @@ FFPROBE = resolve_binary("ffprobe")
 PLAYLIST_DELAY_SECONDS = 3
 
 # --- Auto-update ---------------------------------------------------------
-APP_VERSION = "1.5"
+APP_VERSION = "1.6"
 GITHUB_REPO = "Mitul9703/beam-yt-downloader"
-UPDATE_ASSET = "BeamYouTubeDownloader-AppleSilicon.zip"
+UPDATE_ASSET = "BeamDownloader-AppleSilicon.zip"
 UPDATE_CHECK_TTL = 600  # re-check GitHub at most every 10 minutes
 _UPDATE_LOCK = threading.Lock()
 _UPDATE_CACHE: dict[str, Any] = {"checked_at": 0.0, "info": None}
@@ -372,7 +372,7 @@ def render_page() -> bytes:
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Beam YouTube Downloader</title>
+    <title>Beam Downloader</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet">
@@ -1072,7 +1072,7 @@ def render_page() -> bytes:
   <body>
     <main>
       <section class="hero">
-        <h1>Beam YouTube Downloader</h1>
+        <h1>Beam Downloader</h1>
         <button id="openSettingsBtn" class="secondary" type="button" aria-label="Open settings" style="display:inline-flex; align-items:center; gap:8px; font-size:1rem; padding:11px 18px">&#9881;&#65039; Settings</button>
       </section>
 
@@ -4154,14 +4154,14 @@ def run_macos_app(url: str, open_browser: bool = True) -> bool:
 
     app_menu = AppKit.NSMenu.alloc().init()
     open_item = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-        "Open Beam YouTube Downloader", "openUI:", "o"
+        "Open Beam Downloader", "openUI:", "o"
     )
     open_item.setTarget_(delegate)
     app_menu.addItem_(open_item)
     app_menu.addItem_(AppKit.NSMenuItem.separatorItem())
     app_menu.addItem_(
         AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Quit Beam YouTube Downloader", "terminate:", "q"
+            "Quit Beam Downloader", "terminate:", "q"
         )
     )
     app_item.setSubmenu_(app_menu)
@@ -4178,7 +4178,7 @@ def main() -> None:
     threading.Thread(target=worker_loop, daemon=True).start()
     server = ThreadingHTTPServer((HOST, port), AppHandler)
     url = f"http://{HOST}:{port}"
-    print(f"Beam YouTube Downloader is running at {url}")
+    print(f"Beam Downloader is running at {url}")
     log_environment(url)
 
     want_browser = os.environ.get("YT_DOWNLOADER_NO_BROWSER") != "1"

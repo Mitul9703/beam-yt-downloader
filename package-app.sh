@@ -4,14 +4,14 @@
 # next to it, and zips with ditto so the bundle survives transfer.
 #
 # Prereqs: you've already run  .buildvenv/bin/python setup.py py2app  so that
-# "dist/Beam YouTube Downloader.app" exists.
+# "dist/Beam Downloader.app" exists.
 #
 set -euo pipefail
 cd "$(dirname "$0")"
 
-APP="dist/Beam YouTube Downloader.app"
-ZIP="dist/BeamYouTubeDownloader-AppleSilicon.zip"
-STAGE="dist/Beam YouTube Downloader (Mac)"
+APP="dist/Beam Downloader.app"
+ZIP="dist/BeamDownloader-AppleSilicon.zip"
+STAGE="dist/Beam Downloader (Mac)"
 
 [ -d "$APP" ] || { echo "Build first: .buildvenv/bin/python setup.py py2app"; exit 1; }
 
@@ -21,7 +21,7 @@ codesign --verify --verbose "$APP" >/dev/null && echo "  signature OK"
 
 echo "Staging app + README..."
 rm -rf "$STAGE"; mkdir -p "$STAGE"
-ditto "$APP" "$STAGE/Beam YouTube Downloader.app"
+ditto "$APP" "$STAGE/Beam Downloader.app"
 cp INSTALL-README.txt "$STAGE/INSTALL-README.txt"
 
 echo "Zipping..."
